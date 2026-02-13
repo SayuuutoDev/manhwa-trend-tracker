@@ -143,6 +143,10 @@ Recent changes (2026-02-13)
   - Backend query filters snapshots by `source_id` when provided.
 - UI now requests Asura-only trending (Followers metric + `sourceId=2`), and the selector is restricted to Asura followers.
 - Trending responses now include `coverImageUrl` from `manhwas.cover_image_url`; UI shows a cover image with initials fallback.
+- Asura batch now attempts to populate `manhwas` metadata (cover image URL, description, genre) when missing, using scraped page data.
 
 Instruction
 - Always update `CONTEXT.md` after making changes (features, fixes, migrations, configs, or new files).
+
+Recent docs
+- Added `README.md` with run instructions for backend, scraping, frontend, and troubleshooting.

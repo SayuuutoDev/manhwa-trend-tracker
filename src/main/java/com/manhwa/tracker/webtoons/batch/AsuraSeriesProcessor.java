@@ -20,6 +20,8 @@ import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -70,6 +72,8 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
             System.out.println("WARN: Asura title not linked to existing manhwa, skipping: " + resolvedTitle);
             return null;
         }
+
+        updateManhwaMetadata(manhwaId, doc);
 
         MetricSnapshot snapshot = new MetricSnapshot();
         snapshot.setManhwaId(manhwaId);
@@ -149,5 +153,89 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
             return titleTag.replace(" - Asura Scans", "").trim();
         }
         return "";
+    }
+
+    private void updateManhwaMetadata(Long manhwaId, Document doc) {
+        Manhwa manhwa = manhwaRepository.findById(manhwaId).orElse(null);
+        if (manhwa == null) {
+            return;
+        }
+        String coverImageUrl = extractCoverImageUrl(doc);
+        String description = extractDescription(doc);
+        String genre = extractGenres(doc);
+
+        boolean updated = false;
+        if (coverImageUrl != null && !coverImageUrl.isBlank() &&
+                (manhwa.getCoverImageUrl() == null || manhwa.getCoverImageUrl().isBlank())) {
+            manhwa.setCoverImageUrl(coverImageUrl);
+            updated = true;
+        }
+        if (description != null && !description.isBlank() &&
+                (manhwa.getDescription() == null || manhwa.getDescription().isBlank())) {
+            manhwa.setDescription(description);
+            updated = true;
+        }
+        if (genre != null && !genre.isBlank() &&
+                (manhwa.getGenre() == null || manhwa.getGenre().isBlank())) {
+            manhwa.setGenre(genre);
+            updated = true;
+        }
+        if (updated) {
+            manhwaRepository.save(manhwa);
+        }
+    }
+
+    private String extractCoverImageUrl(Document doc) {
+        String ogImage = doc.select("meta[property=og:image]").attr("content").trim();
+        if (!ogImage.isEmpty()) {
+            return ogImage;
+        }
+        String altOgImage = doc.select("meta[name=og:image]").attr("content").trim();
+        if (!altOgImage.isEmpty()) {
+            return altOgImage;
+        }
+        String cover = doc.select(".series-cover img, .thumb img, .cover img, img.cover, img[alt*=Cover]")
+                .attr("src").trim();
+        if (!cover.isEmpty()) {
+            return cover;
+        }
+        return "";
+    }
+
+    private String extractDescription(Document doc) {
+        String ogDescription = doc.select("meta[property=og:description]").attr("content").trim();
+        if (!ogDescription.isEmpty()) {
+            return ogDescription;
+        }
+        String metaDescription = doc.select("meta[name=description]").attr("content").trim();
+        if (!metaDescription.isEmpty()) {
+            return metaDescription;
+        }
+        String summary = doc.select(".series-summary, .description, .series-desc, .summary")
+                .text().trim();
+        if (!summary.isEmpty()) {
+            return summary;
+        }
+        return "";
+    }
+
+    private String extractGenres(Document doc) {
+        Set<String> genres = new LinkedHashSet<>();
+        for (Element el : doc.select(".genres a, .series-genres a, .tags a, a.genre, .info .genre a")) {
+            String text = el.text().trim();
+            if (!text.isEmpty()) {
+                genres.add(text);
+            }
+        }
+        if (genres.isEmpty()) {
+            String single = doc.select(".genre, .categories").text().trim();
+            if (!single.isEmpty()) {
+                genres.add(single);
+            }
+        }
+        if (genres.isEmpty()) {
+            return "";
+        }
+        return String.join(", ", genres);
     }
 }

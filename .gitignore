@@ -3,6 +3,18 @@ target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+ui/node_modules/
+ui/dist/
+ui/.vite/
+.env
+*.log
+*.tmp
+*.swp
+*.Zone.Identifier
+*:Zone.Identifier
+series.json
+genre.json
+view-source_*.html
 
 ### STS ###
 .apt_generated
