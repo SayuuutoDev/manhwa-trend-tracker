@@ -143,10 +143,13 @@ Recent changes (2026-02-13)
   - Backend query filters snapshots by `source_id` when provided.
 - UI now requests Asura-only trending (Followers metric + `sourceId=2`), and the selector is restricted to Asura followers.
 - Trending responses now include `coverImageUrl` from `manhwas.cover_image_url`; UI shows a cover image with initials fallback.
-- Asura batch now attempts to populate `manhwas` metadata (cover image URL, description, genre) when missing, using scraped page data.
+- Asura batch now refreshes `manhwas` metadata (cover image URL, description, genre) on every run using scraped page data.
+- UI restyled with a neon-ink palette and larger, clipped cover cards for a more premium, cinematic feel.
+- Fixed tilt interaction by animating a custom `--rise-y` property instead of overriding card transforms.
 
 Instruction
 - Always update `CONTEXT.md` after making changes (features, fixes, migrations, configs, or new files).
 
 Recent docs
 - Added `README.md` with run instructions for backend, scraping, frontend, and troubleshooting.
+- 2026-02-14: Removed entry animation on trend cards; cover image now starts at ~20% width of card and expands to ~30% on hover with a cropped, zoomed look.

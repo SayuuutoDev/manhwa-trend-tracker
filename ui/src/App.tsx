@@ -4,10 +4,11 @@ import { MetricType, TrendingManhwa } from "./types";
 
 const ASURA_SOURCE_ID = 2;
 const metricOptions: { label: string; value: MetricType; caption: string }[] = [
-  { label: "Followers", value: "FOLLOWERS", caption: "Asura fanbase growth" }
+  { label: "Asura Pulse", value: "FOLLOWERS", caption: "Followers surging right now" }
 ];
 
 const formatter = new Intl.NumberFormat("en-US", { notation: "compact" });
+const badges = ["Crown", "Hot", "Rising"];
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -28,6 +29,29 @@ function getInitials(title: string) {
     .slice(0, 2)
     .map((word) => word[0]?.toUpperCase() ?? "")
     .join("");
+}
+
+function applyTilt(e: React.MouseEvent<HTMLElement>) {
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const rotateX = ((y - centerY) / centerY) * -6;
+  const rotateY = ((x - centerX) / centerX) * 6;
+  card.style.setProperty("--tilt-x", `${rotateX.toFixed(2)}deg`);
+  card.style.setProperty("--tilt-y", `${rotateY.toFixed(2)}deg`);
+  card.style.setProperty("--glow-x", `${(x / rect.width) * 100}%`);
+  card.style.setProperty("--glow-y", `${(y / rect.height) * 100}%`);
+  card.setAttribute("data-tilt", "true");
+}
+
+function resetTilt(e: React.MouseEvent<HTMLElement>) {
+  const card = e.currentTarget;
+  card.style.setProperty("--tilt-x", "0deg");
+  card.style.setProperty("--tilt-y", "0deg");
+  card.removeAttribute("data-tilt");
 }
 
 export default function App() {
@@ -69,10 +93,10 @@ export default function App() {
     <div className="app">
       <header className="hero">
         <div className="hero-tag">Manhwa Trend Tracker</div>
-        <h1>Top 10 movers right now.</h1>
+        <h1>Asura’s hottest climbs, framed in neon.</h1>
         <p>
-          Real-time heat, pure Asura energy. Track the fastest-rising series and see who is surging
-          right now.
+          A high-voltage leaderboard designed for instant obsession. Bigger covers, sharper motion,
+          and the fastest-rising series at a glance.
         </p>
         <div className="hero-controls">
           {metricOptions.map((option) => (
@@ -117,9 +141,15 @@ export default function App() {
         ) : (
           <div className="trend-list">
             {items.map((item, index) => (
-              <article className="trend-card" key={item.manhwaId} style={{ animationDelay: `${index * 60}ms` }}>
+              <article
+                className="trend-card"
+                key={item.manhwaId}
+                onMouseMove={applyTilt}
+                onMouseLeave={resetTilt}
+              >
                 <div className="rank">#{index + 1}</div>
                 <div className="cover">
+                  {index < 3 ? <div className={`badge badge-${index}`}>{badges[index]}</div> : null}
                   {item.coverImageUrl ? (
                     <img src={item.coverImageUrl} alt={`${item.title} cover`} loading="lazy" />
                   ) : (

@@ -166,17 +166,17 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
 
         boolean updated = false;
         if (coverImageUrl != null && !coverImageUrl.isBlank() &&
-                (manhwa.getCoverImageUrl() == null || manhwa.getCoverImageUrl().isBlank())) {
+                !coverImageUrl.equals(manhwa.getCoverImageUrl())) {
             manhwa.setCoverImageUrl(coverImageUrl);
             updated = true;
         }
         if (description != null && !description.isBlank() &&
-                (manhwa.getDescription() == null || manhwa.getDescription().isBlank())) {
+                !description.equals(manhwa.getDescription())) {
             manhwa.setDescription(description);
             updated = true;
         }
         if (genre != null && !genre.isBlank() &&
-                (manhwa.getGenre() == null || manhwa.getGenre().isBlank())) {
+                !genre.equals(manhwa.getGenre())) {
             manhwa.setGenre(genre);
             updated = true;
         }
