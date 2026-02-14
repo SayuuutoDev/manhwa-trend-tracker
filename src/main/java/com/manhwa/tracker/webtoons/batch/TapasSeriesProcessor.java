@@ -10,6 +10,8 @@ import com.manhwa.tracker.webtoons.model.TitleSource;
 import com.manhwa.tracker.webtoons.repository.ManhwaExternalIdRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaTitleRepository;
+import com.manhwa.tracker.webtoons.service.CoverSelectionService;
+import com.manhwa.tracker.webtoons.service.MangaUpdatesEnrichmentService;
 import com.manhwa.tracker.webtoons.service.TitleNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.item.ItemProcessor;
@@ -30,6 +32,8 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
     private final ManhwaRepository manhwaRepository;
     private final ManhwaTitleRepository manhwaTitleRepository;
     private final ManhwaExternalIdRepository manhwaExternalIdRepository;
+    private final CoverSelectionService coverSelectionService;
+    private final MangaUpdatesEnrichmentService mangaUpdatesEnrichmentService;
 
     private final List<String> skippedTitles = new ArrayList<>();
 
@@ -46,6 +50,8 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
 
         upsertExternalId(manhwaId, dto.getSeriesId());
         upsertAlias(manhwaId, dto);
+        coverSelectionService.upsertCoverCandidate(manhwaId, TitleSource.TAPAS, dto.getCoverImageUrl());
+        mangaUpdatesEnrichmentService.enrichManhwa(manhwaId, dto.getTitle());
 
         List<MetricSnapshot> snapshots = new ArrayList<>(3);
         LocalDateTime now = LocalDateTime.now();
@@ -94,11 +100,18 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
         if (seriesId == null || seriesId.isBlank()) {
             return;
         }
-        if (manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.TAPAS, seriesId).isPresent()) {
+        String seriesUrl = "https://tapas.io/series/" + seriesId;
+        Optional<ManhwaExternalId> existing = manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.TAPAS, seriesId);
+        if (existing.isPresent()) {
+            ManhwaExternalId external = existing.get();
+            if (external.getUrl() == null || external.getUrl().isBlank()) {
+                external.setUrl(seriesUrl);
+                manhwaExternalIdRepository.save(external);
+            }
             return;
         }
         try {
-            manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.TAPAS, seriesId, null));
+            manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.TAPAS, seriesId, seriesUrl));
         } catch (DataIntegrityViolationException ignored) {
         }
     }

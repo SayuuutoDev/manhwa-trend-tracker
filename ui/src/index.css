@@ -94,6 +94,34 @@ body {
 
 .hero-tag {
   display: inline-flex;
+.top-nav {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.top-nav-link {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.top-nav-link:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 107, 107, 0.6);
+}
+
+.top-nav-link.is-active {
+  border-color: rgba(255, 107, 107, 0.75);
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.26), rgba(0, 210, 255, 0.16));
+}
   align-items: center;
   gap: 10px;
   background: rgba(240, 180, 41, 0.15);
@@ -168,6 +196,150 @@ h1 {
   backdrop-filter: blur(12px);
 }
 
+.jobs-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  padding: clamp(20px, 4vw, 30px);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(12px);
+  margin-bottom: 28px;
+}
+
+.job-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.job-card {
+  display: grid;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(34, 31, 51, 0.92), rgba(24, 23, 40, 0.92));
+  border-radius: 18px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.job-row h3 {
+  font-size: 1rem;
+}
+
+.job-status {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+}
+
+.status-started,
+.status-starting {
+  color: #0b0b0f;
+  background: linear-gradient(135deg, #f7c948, #ffb86b);
+}
+
+.status-completed {
+  color: #0b0b0f;
+  background: linear-gradient(135deg, #6ee7b7, #34d399);
+}
+
+.status-failed {
+  color: #ffe5e5;
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.8), rgba(0, 210, 255, 0.8));
+}
+
+.progress-fill.is-completed {
+  background: linear-gradient(135deg, #6ee7b7, #34d399);
+}
+
+.progress-fill.is-failed {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+
+.progress-fill.is-running {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill.is-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0) 15%,
+    rgba(255, 255, 255, 0.35) 50%,
+    rgba(255, 255, 255, 0) 85%
+  );
+  animation: progressSweep 1.4s linear infinite;
+}
+
+.job-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.job-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.job-run {
+  justify-self: start;
+  border: 1px solid rgba(255, 107, 107, 0.45);
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.job-run:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: rgba(255, 107, 107, 0.75);
+}
+
+.job-run:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.jobs-error {
+  margin-bottom: 12px;
+  color: #ffb4b4;
+  font-size: 0.9rem;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -209,6 +381,12 @@ h1 {
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   position: relative;
   overflow: hidden;
+}
+
+.trend-card.is-link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
 }
 
 .trend-card:hover {
@@ -387,6 +565,15 @@ h1 {
   }
   100% {
     transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes progressSweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
   }
 }
 

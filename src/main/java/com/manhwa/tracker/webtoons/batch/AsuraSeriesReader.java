@@ -2,6 +2,8 @@ package com.manhwa.tracker.webtoons.batch;
 
 import com.manhwa.tracker.webtoons.model.AsuraSeriesDTO;
 import org.jsoup.Jsoup;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.BeforeStep;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -36,6 +38,12 @@ public class AsuraSeriesReader implements ItemReader<AsuraSeriesDTO> {
 
     @Value("${app.asura.page-delay-ms:300}")
     private long pageDelayMs;
+
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        data.clear();
+        index = 0;
+    }
 
     @Override
     public AsuraSeriesDTO read() throws Exception {

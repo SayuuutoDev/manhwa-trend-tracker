@@ -5,6 +5,8 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.BeforeStep;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.stereotype.Component;
 import java.util.ArrayList;
@@ -14,6 +16,12 @@ import java.util.List;
 public class WebtoonsReader implements ItemReader<ManhwaDTO> {
     private List<ManhwaDTO> data = new ArrayList<>();
     private int index = 0;
+
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        data.clear();
+        index = 0;
+    }
 
     @Override
     public ManhwaDTO read() throws Exception {
@@ -37,12 +45,13 @@ public class WebtoonsReader implements ItemReader<ManhwaDTO> {
 
                 // 4. We look for the <img> tag and get the 'src' attribute
                 String coverImageUrl = row.select(".image_wrap img").attr("src");
+                String seriesUrl = row.select("a").attr("abs:href");
 
                 // 5. Genre
                 String genre = row.select(".genre").text();
                 if (!title.isEmpty()) {
                     Long views = parseViews(viewsRaw);
-                    data.add(new ManhwaDTO(title, views, coverImageUrl, genre));
+                    data.add(new ManhwaDTO(title, views, seriesUrl, coverImageUrl, genre));
                     System.out.println("DEBUG: Scraped [" + title + "] with " + views + " views.");
                 }
             }

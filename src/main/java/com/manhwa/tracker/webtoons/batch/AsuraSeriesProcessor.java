@@ -2,11 +2,16 @@ package com.manhwa.tracker.webtoons.batch;
 
 import com.manhwa.tracker.webtoons.model.AsuraSeriesDTO;
 import com.manhwa.tracker.webtoons.model.Manhwa;
+import com.manhwa.tracker.webtoons.model.ManhwaExternalId;
 import com.manhwa.tracker.webtoons.model.ManhwaTitle;
 import com.manhwa.tracker.webtoons.model.MetricSnapshot;
 import com.manhwa.tracker.webtoons.model.MetricType;
+import com.manhwa.tracker.webtoons.model.TitleSource;
+import com.manhwa.tracker.webtoons.repository.ManhwaExternalIdRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaTitleRepository;
+import com.manhwa.tracker.webtoons.service.CoverSelectionService;
+import com.manhwa.tracker.webtoons.service.MangaUpdatesEnrichmentService;
 import com.manhwa.tracker.webtoons.service.TitleNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
@@ -14,6 +19,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PreDestroy;
@@ -35,6 +41,9 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
 
     private final ManhwaRepository manhwaRepository;
     private final ManhwaTitleRepository manhwaTitleRepository;
+    private final ManhwaExternalIdRepository manhwaExternalIdRepository;
+    private final CoverSelectionService coverSelectionService;
+    private final MangaUpdatesEnrichmentService mangaUpdatesEnrichmentService;
     private final List<String> skippedTitles = new ArrayList<>();
 
     @Value("${app.asura.user-agent:Mozilla/5.0}")
@@ -73,7 +82,9 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
             return null;
         }
 
+        upsertExternalId(manhwaId, dto.getSeriesUrl());
         updateManhwaMetadata(manhwaId, doc);
+        mangaUpdatesEnrichmentService.enrichManhwa(manhwaId, resolvedTitle);
 
         MetricSnapshot snapshot = new MetricSnapshot();
         snapshot.setManhwaId(manhwaId);
@@ -83,6 +94,20 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
         snapshot.setCapturedAt(LocalDateTime.now());
 
         return snapshot;
+    }
+
+    private void upsertExternalId(Long manhwaId, String seriesUrl) {
+        if (seriesUrl == null || seriesUrl.isBlank()) {
+            return;
+        }
+        String externalId = seriesUrl.trim();
+        if (manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.ASURA, externalId).isPresent()) {
+            return;
+        }
+        try {
+            manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.ASURA, externalId, seriesUrl));
+        } catch (DataIntegrityViolationException ignored) {
+        }
     }
 
     private Long resolveManhwaId(String title) {
@@ -164,12 +189,9 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
         String description = extractDescription(doc);
         String genre = extractGenres(doc);
 
+        coverSelectionService.upsertCoverCandidate(manhwaId, TitleSource.ASURA, coverImageUrl);
+
         boolean updated = false;
-        if (coverImageUrl != null && !coverImageUrl.isBlank() &&
-                !coverImageUrl.equals(manhwa.getCoverImageUrl())) {
-            manhwa.setCoverImageUrl(coverImageUrl);
-            updated = true;
-        }
         if (description != null && !description.isBlank() &&
                 !description.equals(manhwa.getDescription())) {
             manhwa.setDescription(description);

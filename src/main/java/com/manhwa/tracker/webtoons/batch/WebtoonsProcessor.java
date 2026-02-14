@@ -2,14 +2,20 @@ package com.manhwa.tracker.webtoons.batch;
 
 import com.manhwa.tracker.webtoons.model.Manhwa;
 import com.manhwa.tracker.webtoons.model.ManhwaDTO;
+import com.manhwa.tracker.webtoons.model.ManhwaExternalId;
 import com.manhwa.tracker.webtoons.model.ManhwaTitle;
 import com.manhwa.tracker.webtoons.model.MetricSnapshot;
 import com.manhwa.tracker.webtoons.model.MetricType;
+import com.manhwa.tracker.webtoons.model.TitleSource;
+import com.manhwa.tracker.webtoons.repository.ManhwaExternalIdRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaTitleRepository;
+import com.manhwa.tracker.webtoons.service.CoverSelectionService;
+import com.manhwa.tracker.webtoons.service.MangaUpdatesEnrichmentService;
 import com.manhwa.tracker.webtoons.service.TitleNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.item.ItemProcessor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PreDestroy;
@@ -24,6 +30,9 @@ public class WebtoonsProcessor implements ItemProcessor<ManhwaDTO, MetricSnapsho
 
     private final ManhwaRepository manhwaRepository;
     private final ManhwaTitleRepository manhwaTitleRepository;
+    private final ManhwaExternalIdRepository manhwaExternalIdRepository;
+    private final CoverSelectionService coverSelectionService;
+    private final MangaUpdatesEnrichmentService mangaUpdatesEnrichmentService;
     private final List<String> skippedTitles = new ArrayList<>();
 
     @Override
@@ -40,20 +49,20 @@ public class WebtoonsProcessor implements ItemProcessor<ManhwaDTO, MetricSnapsho
         // 2. Update metadata if it has changed or was previously null
         boolean needsUpdate = false;
 
-        if (manhwa.getCoverImageUrl() == null || !manhwa.getCoverImageUrl().equals(dto.getCoverImageUrl())) {
-            manhwa.setCoverImageUrl(dto.getCoverImageUrl());
-            needsUpdate = true;
-        }
+        upsertExternalId(manhwa.getId(), dto.getSeriesUrl());
+        coverSelectionService.upsertCoverCandidate(manhwa.getId(), TitleSource.WEBTOONS, dto.getCoverImageUrl());
 
         if (manhwa.getGenre() == null || !manhwa.getGenre().equals(dto.getGenre())) {
             manhwa.setGenre(dto.getGenre());
             needsUpdate = true;
         }
 
-        // Save the Manhwa entity if we added/changed the cover image or genre
+        // Save the Manhwa entity only when textual metadata changed (covers are handled by CoverSelectionService)
         if (needsUpdate) {
             manhwa = manhwaRepository.save(manhwa);
         }
+
+        mangaUpdatesEnrichmentService.enrichManhwa(manhwa.getId(), dto.getTitle());
 
         // 3. Create the Snapshot entity linked to the Manhwa
         MetricSnapshot snapshot = new MetricSnapshot();
@@ -64,6 +73,20 @@ public class WebtoonsProcessor implements ItemProcessor<ManhwaDTO, MetricSnapsho
         snapshot.setCapturedAt(LocalDateTime.now());
 
         return snapshot;
+    }
+
+    private void upsertExternalId(Long manhwaId, String seriesUrl) {
+        if (seriesUrl == null || seriesUrl.isBlank()) {
+            return;
+        }
+        String externalId = seriesUrl.trim();
+        if (manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.WEBTOONS, externalId).isPresent()) {
+            return;
+        }
+        try {
+            manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.WEBTOONS, externalId, seriesUrl));
+        } catch (DataIntegrityViolationException ignored) {
+        }
     }
 
     private Manhwa resolveManhwa(String title) {

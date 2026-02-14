@@ -29,6 +29,8 @@ To enable scraping jobs, use the `scrape` profile:
 API examples:
 - Asura-only trending (followers): `http://localhost:8080/api/trending?metric=FOLLOWERS&limit=10&sourceId=2`
 - Generic trending (all sources, views): `http://localhost:8080/api/trending?metric=VIEWS&limit=10`
+- List batch job status/progress: `http://localhost:8080/api/batches`
+- Start a batch job manually: `POST http://localhost:8080/api/batches/asuraScrapeJob/start`
 
 ## Scraping
 Run Asura scrape once (also fills cover/description/genre):
@@ -55,7 +57,8 @@ npm run dev
 ```
 
 Open:
-- `http://localhost:5173`
+- `http://localhost:5173/` (Trending page)
+- `http://localhost:5173/batches` (Batch Runner page for running jobs + live progress)
 
 ## Troubleshooting
 If Maven fails with `Permission denied` in `target/`, fix ownership:

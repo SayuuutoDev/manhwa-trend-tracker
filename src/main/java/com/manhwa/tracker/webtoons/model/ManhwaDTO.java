@@ -7,6 +7,7 @@ import lombok.Data;
 public class ManhwaDTO {
     private String title;
     private Long views;
+    private String seriesUrl;
     private String coverImageUrl;
     private String genre;
 

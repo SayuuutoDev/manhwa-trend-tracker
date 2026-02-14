@@ -3,6 +3,8 @@ package com.manhwa.tracker.webtoons.batch;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.manhwa.tracker.webtoons.model.TapasSeriesDTO;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.BeforeStep;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -48,6 +50,14 @@ public class TapasSeriesReader implements ItemReader<TapasSeriesDTO> {
     @Value("${app.tapas.request-delay-ms:200}")
     private long requestDelayMs;
 
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        pageItems.clear();
+        index = 0;
+        currentPage = 1;
+        lastPage = false;
+    }
+
     @Override
     public TapasSeriesDTO read() throws Exception {
         if (index < pageItems.size()) {
@@ -82,8 +92,14 @@ public class TapasSeriesReader implements ItemReader<TapasSeriesDTO> {
         for (JsonNode item : items) {
             TapasSeriesDTO dto = new TapasSeriesDTO();
             dto.setSeriesId(item.path("seriesId").asText());
+            dto.setSeriesUrl("https://tapas.io/series/" + dto.getSeriesId());
             dto.setTitle(item.path("title").asText());
             dto.setLanguageCode(item.path("languageCode").asText(null));
+            JsonNode assets = item.path("assetProperty");
+            String emailImageUrl = assets.path("emailImage").path("path").asText(null);
+            String bookCoverImageUrl = assets.path("bookCoverImage").path("path").asText(null);
+            String thumbnailImageUrl = assets.path("thumbnailImage").path("path").asText(null);
+            dto.setCoverImageUrl(firstNonBlank(emailImageUrl, bookCoverImageUrl, thumbnailImageUrl));
             JsonNode service = item.path("serviceProperty");
             dto.setViewCount(service.path("viewCount").isMissingNode() ? null : service.path("viewCount").asLong());
             dto.setSubscriberCount(service.path("subscriberCount").isMissingNode() ? null : service.path("subscriberCount").asLong());
@@ -103,5 +119,14 @@ public class TapasSeriesReader implements ItemReader<TapasSeriesDTO> {
             return null;
         }
         return pageItems.get(index++);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

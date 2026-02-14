@@ -6,9 +6,13 @@ public interface TrendingProjection {
     Long getManhwaId();
     String getTitle();
     String getCoverImageUrl();
+    String getReadUrl();
     Long getLatestValue();
     LocalDateTime getLatestAt();
     Long getPreviousValue();
     LocalDateTime getPreviousAt();
     Long getGrowth();
+    Double getBaselineDays();
+    Double getGrowthPerDay();
+    Double getGrowthPercent();
 }

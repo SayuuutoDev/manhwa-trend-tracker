@@ -1,6 +1,6 @@
 # Project Context (Codex Session Summary)
 
-Last updated: 2026-02-13
+Last updated: 2026-02-14
 
 Purpose
 - Expand the manhwa tracker to support multiple sources and unify snapshots across alternate titles.
@@ -160,3 +160,109 @@ Instruction
 Recent docs
 - Added `README.md` with run instructions for backend, scraping, frontend, and troubleshooting.
 - 2026-02-14: Removed entry animation on trend cards; cover image now starts at ~20% width of card and expands to ~30% on hover with a cropped, zoomed look.
+- 2026-02-14: Added batch control and progress tracking:
+  - Backend API to trigger + inspect Spring Batch scrapers:
+    - `GET /api/batches` (list jobs with status/counters)
+    - `GET /api/batches/{jobName}` (single job view)
+    - `POST /api/batches/{jobName}/start` (manual run)
+  - New files:
+    - `src/main/java/com/manhwa/tracker/webtoons/api/BatchControlController.java`
+    - `src/main/java/com/manhwa/tracker/webtoons/service/BatchControlService.java`
+    - `src/main/java/com/manhwa/tracker/webtoons/model/BatchJobView.java`
+    - `src/main/java/com/manhwa/tracker/webtoons/model/BatchStartResponse.java`
+  - `ApiExceptionHandler` now returns 400 for invalid job names and 409 when a job is already running.
+- 2026-02-14: Frontend now includes a Scraper Control panel:
+  - Run buttons for Asura/Webtoons/Tapas jobs.
+  - Polls `/api/batches` every 2 seconds.
+  - Live execution state with status pills, progress bars, and read/write/skip counters.
+  - Updated files: `ui/src/App.tsx`, `ui/src/api.ts`, `ui/src/types.ts`, `ui/src/index.css`.
+- 2026-02-14: Fixed reader state reuse across manual reruns:
+  - `WebtoonsReader`, `AsuraSeriesReader`, and `TapasSeriesReader` now reset in-memory paging/index state at step start via `@BeforeStep`.
+  - This allows repeated executions from the new batch control UI without stale reader state.
+- 2026-02-14: Frontend pages split so batch controls are separate from trending:
+  - `/` now shows only the Trending leaderboard UI.
+  - `/batches` now shows only the Batch Runner controls and live execution progress.
+  - Header navigation toggles between the two pages using browser history paths.
+- 2026-02-14: Fixed Batch Runner start for Webtoons job:
+  - `BatchControlService` now resolves runnable jobs by Spring Batch job name (`job.getName()`) instead of bean name.
+  - This fixes `POST /api/batches/webtoonsScrapeJob/start` returning "Unknown job".
+- 2026-02-14: Trending page now has a new Tapas.io growth nav panel:
+  - Added panel switcher options for Asura and Tapas in `ui/src/App.tsx`.
+  - Tapas panel requests `/api/trending` with `metric=VIEWS` and `sourceId=3`.
+  - Trending hero text and ranking title now update based on selected source panel.
+- 2026-02-14: Tapas scraper now ingests and applies cover URLs to `manhwas`:
+  - `TapasSeriesReader` now extracts cover from `assetProperty.bookCoverImage.path` with fallback to `assetProperty.thumbnailImage.path`.
+  - `TapasSeriesDTO` now carries `coverImageUrl`.
+  - `TapasSeriesProcessor` now overwrites `manhwas.cover_image_url` for matched titles when Tapas provides a non-blank URL.
+- 2026-02-14: Trending growth formula and UX were hardened:
+  - API now supports ranking modes via `mode=ABS|RATE|PCT` (default `RATE`).
+  - SQL baseline now picks the snapshot nearest to ~7 days before latest (instead of oldest fallback).
+  - Added data-quality guards: latest snapshot must be fresh (within 3 days) and baseline gap must be at least 6 hours.
+  - Response now includes `baselineDays`, `growthPerDay`, `growthPercent`, and `rankingMode`.
+  - Frontend now displays explanatory copy that ranking is rate-based and uses the nearest available window to 7 days, with current average baseline days shown.
+- 2026-02-14: Trending page now includes a Webtoon growth panel:
+  - Added Webtoon source option in the trending panel switcher (`metric=VIEWS`, `sourceId=1`, `mode=RATE`).
+  - Users can now switch between Asura, Tapas, and Webtoon growth rankings from the same trending page.
+- 2026-02-14: Cover quality selection added across all batches:
+  - New table + model to store per-source cover candidates:
+    - `src/main/resources/db/migration/V4__create_cover_candidates.sql`
+    - `src/main/java/com/manhwa/tracker/webtoons/model/ManhwaCoverCandidate.java`
+    - `src/main/java/com/manhwa/tracker/webtoons/repository/ManhwaCoverCandidateRepository.java`
+  - New service:
+    - `src/main/java/com/manhwa/tracker/webtoons/service/CoverSelectionService.java`
+    - Upserts one cover candidate per `(manhwa, source)`, scores candidates, and writes the best URL into `manhwas.cover_image_url`.
+    - Source priority favors higher-quality providers (`ASURA > WEBTOONS > TAPAS > MANGAUPDATES`) with URL heuristics for thumbnails/quality hints.
+  - All cover writes now flow through cover selection:
+    - `AsuraSeriesProcessor` -> `TitleSource.ASURA`
+    - `WebtoonsProcessor` -> `TitleSource.WEBTOONS`
+    - `TapasSeriesProcessor` -> `TitleSource.TAPAS`
+    - `MangaUpdatesEnrichmentService` -> `TitleSource.MANGAUPDATES`
+  - Runtime verification:
+    - `webtoonsScrapeJob` and `asuraScrapeJob` complete successfully after integration.
+    - `manhwa_cover_candidates` populated as expected.
+    - Example fixed: `The Novel's Extra` now prefers Asura cover URL over MangaUpdates cover URL.
+- 2026-02-14: Ranking cards now link to original reading pages:
+  - Trending API now returns `readUrl` per item:
+    - `TrendingProjection` + `TrendingManhwaDTO` include `readUrl`.
+    - `MetricSnapshotRepository.findTrending` now resolves a source-specific URL from `manhwa_external_ids` based on `sourceId`:
+      - `1 -> WEBTOONS`
+      - `2 -> ASURA`
+      - `3 -> TAPAS`
+  - Frontend trend cards are clickable when `readUrl` is present:
+    - `ui/src/App.tsx` renders cards as `<a target="_blank" rel="noopener noreferrer">`.
+    - `ui/src/types.ts` includes `readUrl`.
+    - `ui/src/index.css` styles clickable cards via `.trend-card.is-link`.
+  - Scrapers now persist source page URLs in `manhwa_external_ids.url`:
+    - `WebtoonsReader` now captures `seriesUrl`; `WebtoonsProcessor` upserts `TitleSource.WEBTOONS` external IDs with URL.
+    - `AsuraSeriesProcessor` upserts `TitleSource.ASURA` external IDs with URL.
+    - `TapasSeriesProcessor` now stores `https://tapas.io/series/{seriesId}` and backfills URL on existing Tapas external IDs.
+  - Added migration `V5__backfill_external_id_urls.sql` to populate missing URLs for existing rows:
+    - Tapas numeric IDs -> `https://tapas.io/series/{external_id}`
+    - Asura/Webtoons URL-shaped `external_id` copied into `url`.
+- 2026-02-14: MangaUpdates enrichment integrated across all scrape processors:
+  - New service: `src/main/java/com/manhwa/tracker/webtoons/service/MangaUpdatesEnrichmentService.java`.
+  - Called from `TapasSeriesProcessor`, `WebtoonsProcessor`, and `AsuraSeriesProcessor` after title resolution.
+  - Enrichment behavior:
+    - Uses existing `MANGAUPDATES` external ID first, then falls back to MU title search.
+    - Ignores legacy non-numeric MU IDs for direct series lookup and falls back to search.
+    - Upserts MU aliases into `manhwa_titles` (`source=MANGAUPDATES`).
+    - Updates `manhwas` metadata (cover/description/genre) from MU records.
+    - Adds lightweight retries for MU `429/5xx` responses.
+  - Config added in `application.properties`:
+    - `app.mangaupdates.enabled`
+    - `app.mangaupdates.base-url`
+    - `app.mangaupdates.user-agent`
+    - `app.mangaupdates.request-delay-ms`
+    - `app.mangaupdates.search.max-results`
+- 2026-02-14: Fixed batch failures caused by duplicate MU external IDs:
+  - Root cause: duplicate `manhwa_external_ids` rows for the same `(manhwa_id, source)` caused non-unique query failures during enrichment.
+  - `ManhwaExternalIdRepository` now supports `findAllByManhwaIdAndSource(...)`.
+  - Enrichment lookup/upsert now handles multi-row legacy data safely and updates newest row instead of blindly inserting.
+  - New Flyway migration:
+    - `src/main/resources/db/migration/V3__dedupe_and_constrain_external_ids.sql`
+    - Deduplicates existing rows by `(manhwa_id, source)` keeping the newest ID.
+    - Adds DB constraint `uk_external_id_manhwa_source` (unique on `(manhwa_id, source)`).
+  - Verification:
+    - `webtoonsScrapeJob` and `asuraScrapeJob` complete from `/api/batches/.../start`.
+    - Example record fixed: `The Twins' New Life` now has MU cover `https://cdn.mangaupdates.com/image/i487550.jpg`.
+    - Duplicate `(manhwa_id, source)` rows reduced to zero.
