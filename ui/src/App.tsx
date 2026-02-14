@@ -51,6 +51,7 @@ export default function App() {
   const [items, setItems] = useState<TrendingManhwa[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retrySeed, setRetrySeed] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +75,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [metric]);
+  }, [metric, retrySeed]);
 
   const activeMetric = useMemo(
     () => metricOptions.find((option) => option.value === metric) ?? metricOptions[0],
@@ -119,6 +120,9 @@ export default function App() {
           <div className="empty-state">
             <h3>Could not load leaderboard</h3>
             <p>{error}</p>
+            <button className="retry-button" onClick={() => setRetrySeed((v) => v + 1)}>
+              Retry
+            </button>
           </div>
         ) : loading ? (
           <div className="loader">

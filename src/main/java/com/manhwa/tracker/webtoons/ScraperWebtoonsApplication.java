@@ -11,6 +11,7 @@ import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.context.annotation.Profile;
 @SpringBootApplication
 @EnableScheduling
 public class ScraperWebtoonsApplication {
@@ -20,6 +21,7 @@ public class ScraperWebtoonsApplication {
 	}
 	@Bean
 	@ConditionalOnProperty(prefix = "app.scrape", name = "enabled", havingValue = "true", matchIfMissing = true)
+	@Profile("scrape")
 	CommandLineRunner runJob(JobLauncher jobLauncher, Job scrapeJob) {
 		return args -> {
 			JobParameters params = new JobParametersBuilder()
@@ -31,6 +33,7 @@ public class ScraperWebtoonsApplication {
 
 	@Bean
 	@ConditionalOnProperty(prefix = "app.asura", name = "run-once", havingValue = "true")
+	@Profile("scrape")
 	CommandLineRunner runAsuraJob(JobLauncher jobLauncher, Job asuraScrapeJob) {
 		return args -> {
 			JobParameters params = new JobParametersBuilder()
@@ -43,6 +46,7 @@ public class ScraperWebtoonsApplication {
 
 	@Bean
 	@ConditionalOnProperty(prefix = "app.tapas", name = "run-once", havingValue = "true")
+	@Profile("scrape")
 	CommandLineRunner runTapasJob(JobLauncher jobLauncher, Job tapasScrapeJob) {
 		return args -> {
 			JobParameters params = new JobParametersBuilder()

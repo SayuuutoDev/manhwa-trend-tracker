@@ -152,6 +152,7 @@ Recent changes (2026-02-13)
 - 2026-02-14: Background refined to a “midnight café” palette (warm amber + soft violet + muted blue).
 - 2026-02-14: Cover crop shifted downward to avoid showing the upper part of the image.
 - 2026-02-14: Cover rendering switched to a background-image container to enforce crop position and zoom reliably (now set to 30% vertical position).
+- 2026-02-14: Backend config now uses env vars for DB creds, added snapshot index migration, scraping gated behind `scrape` profile, and API error handling + UI retry button.
 
 Instruction
 - Always update `CONTEXT.md` after making changes (features, fixes, migrations, configs, or new files).

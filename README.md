@@ -21,19 +21,24 @@ Run the API without scraping (recommended for UI use):
 ./mvnw -q spring-boot:run -Dspring-boot.run.arguments="--app.scrape.enabled=false"
 ```
 
+To enable scraping jobs, use the `scrape` profile:
+```bash
+./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments="--app.scrape.enabled=true"
+```
+
 API examples:
 - Asura-only trending (followers): `http://localhost:8080/api/trending?metric=FOLLOWERS&limit=10&sourceId=2`
 - Generic trending (all sources, views): `http://localhost:8080/api/trending?metric=VIEWS&limit=10`
 
 ## Scraping
-Run Asura scrape once (also fills cover/description/genre if missing):
+Run Asura scrape once (also fills cover/description/genre):
 ```bash
-./mvnw -q spring-boot:run -Dspring-boot.run.arguments="--app.asura.run-once=true --app.scrape.enabled=false"
+./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments="--app.asura.run-once=true --app.scrape.enabled=false"
 ```
 
 Run Webtoons + Asura + Tapas once (if you need all sources):
 ```bash
-./mvnw -q spring-boot:run -Dspring-boot.run.arguments="--app.scrape.enabled=true --app.asura.run-once=true --app.tapas.run-once=true"
+./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments="--app.scrape.enabled=true --app.asura.run-once=true --app.tapas.run-once=true"
 ```
 
 ## Frontend (UI)

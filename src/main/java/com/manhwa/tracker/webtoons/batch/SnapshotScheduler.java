@@ -5,11 +5,13 @@ import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
 @ConditionalOnProperty(prefix = "app.scrape", name = "enabled", havingValue = "true", matchIfMissing = true)
+@Profile("scrape")
 public class SnapshotScheduler {
     private final JobLauncher jobLauncher;
     private final Job scrapeJob;
