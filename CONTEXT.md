@@ -146,6 +146,12 @@ Recent changes (2026-02-13)
 - Asura batch now refreshes `manhwas` metadata (cover image URL, description, genre) on every run using scraped page data.
 - UI restyled with a neon-ink palette and larger, clipped cover cards for a more premium, cinematic feel.
 - Fixed tilt interaction by animating a custom `--rise-y` property instead of overriding card transforms.
+- 2026-02-14: Covers are now dominant on trend cards (merged look, 32% width -> 40% on hover) with a cropped zoom and a default SVG cover for missing images.
+- 2026-02-14: Cover layout revised: cover now anchors the left side of the card (45% column), rank overlays the cover, and hover scales the image instead of resizing the column.
+- 2026-02-14: Cover zoom adjusted to show more art; background updated to a lo-fi animated gradient wash.
+- 2026-02-14: Background refined to a “midnight café” palette (warm amber + soft violet + muted blue).
+- 2026-02-14: Cover crop shifted downward to avoid showing the upper part of the image.
+- 2026-02-14: Cover rendering switched to a background-image container to enforce crop position and zoom reliably (now set to 30% vertical position).
 
 Instruction
 - Always update `CONTEXT.md` after making changes (features, fixes, migrations, configs, or new files).

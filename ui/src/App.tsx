@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchTrending } from "./api";
 import { MetricType, TrendingManhwa } from "./types";
+import defaultCover from "./assets/default-cover.svg";
 
 const ASURA_SOURCE_ID = 2;
 const metricOptions: { label: string; value: MetricType; caption: string }[] = [
@@ -20,15 +21,6 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
-}
-
-function getInitials(title: string) {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? "")
-    .join("");
 }
 
 function applyTilt(e: React.MouseEvent<HTMLElement>) {
@@ -147,14 +139,15 @@ export default function App() {
                 onMouseMove={applyTilt}
                 onMouseLeave={resetTilt}
               >
-                <div className="rank">#{index + 1}</div>
                 <div className="cover">
+                  <div className="rank">#{index + 1}</div>
                   {index < 3 ? <div className={`badge badge-${index}`}>{badges[index]}</div> : null}
-                  {item.coverImageUrl ? (
-                    <img src={item.coverImageUrl} alt={`${item.title} cover`} loading="lazy" />
-                  ) : (
-                    <div className="cover-fallback">{getInitials(item.title)}</div>
-                  )}
+                  <div
+                    className="cover-image"
+                    role="img"
+                    aria-label={`${item.title} cover`}
+                    style={{ backgroundImage: `url(${item.coverImageUrl || defaultCover})` }}
+                  />
                 </div>
                 <div className="trend-main">
                   <h3>{item.title}</h3>

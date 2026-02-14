@@ -23,10 +23,10 @@
 body {
   font-family: "Sora", system-ui, sans-serif;
   background:
-    radial-gradient(1000px 520px at 15% -10%, rgba(255, 107, 107, 0.22), transparent 70%),
-    radial-gradient(900px 500px at 90% 10%, rgba(0, 210, 255, 0.18), transparent 70%),
-    radial-gradient(700px 420px at 50% 90%, rgba(247, 201, 72, 0.12), transparent 70%),
-    linear-gradient(160deg, var(--bg-0) 0%, var(--bg-1) 45%, var(--bg-2) 100%);
+    radial-gradient(1200px 600px at 15% 0%, rgba(255, 163, 102, 0.16), transparent 70%),
+    radial-gradient(900px 520px at 85% 15%, rgba(120, 170, 255, 0.12), transparent 70%),
+    radial-gradient(800px 500px at 50% 90%, rgba(186, 120, 255, 0.12), transparent 70%),
+    linear-gradient(160deg, #0c0b12 0%, #1a1621 50%, #211b2c 100%);
   color: var(--text);
   min-height: 100vh;
 }
@@ -45,12 +45,13 @@ body {
   width: 140%;
   height: 160%;
   background-image:
-    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.06), transparent 45%),
-    radial-gradient(circle at 80% 30%, rgba(255, 255, 255, 0.05), transparent 45%),
-    radial-gradient(circle at 35% 75%, rgba(255, 255, 255, 0.04), transparent 45%);
-  animation: drift 18s linear infinite;
+    radial-gradient(circle at 20% 20%, rgba(255, 214, 170, 0.10), transparent 45%),
+    radial-gradient(circle at 70% 25%, rgba(255, 255, 255, 0.03), transparent 45%),
+    radial-gradient(circle at 45% 70%, rgba(255, 255, 255, 0.03), transparent 45%),
+    radial-gradient(circle at 65% 65%, rgba(255, 163, 102, 0.10), transparent 50%);
+  animation: drift 24s ease-in-out infinite;
   pointer-events: none;
-  opacity: 0.4;
+  opacity: 0.45;
 }
 .app {
   position: relative;
@@ -197,13 +198,13 @@ h1 {
 
 .trend-card {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: 45% 1fr auto;
   gap: 18px;
-  padding: 18px 20px;
+  padding: 0 22px 0 0;
   background: linear-gradient(135deg, rgba(34, 31, 51, 0.92), rgba(24, 23, 40, 0.92));
-  border-radius: 18px;
+  border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  align-items: center;
+  align-items: stretch;
   transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   position: relative;
@@ -234,53 +235,53 @@ h1 {
 }
 
 .rank {
+  position: absolute;
+  top: 14px;
+  left: 14px;
   font-family: "Playfair Display", serif;
   font-size: 1.4rem;
   color: var(--accent-3);
+  z-index: 2;
 }
 
 .cover {
-  width: 20%;
-  min-width: 84px;
-  height: 118px;
-  border-radius: 18px 18px 36px 18px;
+  width: 100%;
+  min-width: 0;
+  height: 180px;
+  border-radius: 20px 0 0 20px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-  clip-path: polygon(0 0, 86% 0, 100% 18%, 100% 100%, 0 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   position: relative;
-  transition: width 0.25s ease, box-shadow 0.25s ease;
+  align-self: stretch;
 }
 
-.cover img {
+.cover-image {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: center 20%;
-  transform: scale(1.15);
-}
-
-.cover-fallback {
-  font-family: "Playfair Display", serif;
-  font-weight: 600;
-  color: var(--accent-2);
-  letter-spacing: 0.04em;
-  font-size: 0.9rem;
+  background-size: cover;
+  background-position: center 30%;
+  background-repeat: no-repeat;
+  transform: scale(0.94);
+  transition: transform 0.3s ease;
 }
 
 .trend-card:hover .cover {
-  width: 30%;
-  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.trend-card:hover .cover-image {
+  transform: scale(1.12);
 }
 
 .badge {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  bottom: 10px;
+  left: 10px;
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 0.7rem;
@@ -304,7 +305,7 @@ h1 {
 }
 
 .trend-main h3 {
-  font-size: 1.15rem;
+  font-size: 1.3rem;
   margin-bottom: 6px;
 }
 
@@ -327,7 +328,7 @@ h1 {
 }
 
 .trend-growth .value {
-  font-size: 1.3rem;
+  font-size: 1.6rem;
   font-weight: 600;
   color: var(--accent);
 }
@@ -363,13 +364,13 @@ h1 {
 
 @keyframes drift {
   0% {
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    transform: translate3d(-2%, 2%, 0);
+    transform: translate3d(-2%, 2%, 0) scale(1.02);
   }
   100% {
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
@@ -382,9 +383,19 @@ h1 {
   .trend-card {
     grid-template-columns: 1fr;
     text-align: left;
+    padding: 0 16px 18px;
   }
 
   .trend-growth {
     text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .cover {
+    width: 100%;
+    min-width: 0;
+    height: 240px;
+    border-radius: 18px 18px 0 0;
   }
 }
