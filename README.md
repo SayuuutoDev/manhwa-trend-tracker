@@ -38,6 +38,11 @@ Run Asura scrape once (also fills cover/description/genre):
 ./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments="--app.asura.run-once=true --app.scrape.enabled=false"
 ```
 
+Control Webtoons scrape depth (top N entries from Popular page):
+```bash
+./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments="--app.webtoons.max-items=50 --app.scrape.enabled=false"
+```
+
 Run Webtoons + Asura + Tapas once (if you need all sources):
 ```bash
 ./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments="--app.scrape.enabled=true --app.asura.run-once=true --app.tapas.run-once=true"

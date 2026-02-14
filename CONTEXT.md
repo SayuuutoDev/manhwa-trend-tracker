@@ -239,6 +239,61 @@ Recent docs
   - Added migration `V5__backfill_external_id_urls.sql` to populate missing URLs for existing rows:
     - Tapas numeric IDs -> `https://tapas.io/series/{external_id}`
     - Asura/Webtoons URL-shaped `external_id` copied into `url`.
+- 2026-02-14: Ranking exclusion rule added:
+  - Trending query now excludes manhwas whose `genre` matches "slice of life" (case-insensitive, including `slice-of-life` variants).
+  - Implemented in `src/main/java/com/manhwa/tracker/webtoons/repository/MetricSnapshotRepository.java`.
+- 2026-02-14: Ranking exclusion rule expanded:
+  - Trending query now also excludes `Shoujo` and `Josei` genres (case-insensitive) in addition to `Slice of Life`.
+  - Implemented in `src/main/java/com/manhwa/tracker/webtoons/repository/MetricSnapshotRepository.java`.
+- 2026-02-14: Ranking exclusion rule expanded again:
+  - Trending query now excludes these additional genres (case-insensitive): `Shounen Ai`, `Yaoi`, `Gender Bender`, `Shoujo Ai`, `Yuri`.
+  - Multi-word genre matching handles spaces/hyphens.
+  - Implemented in `src/main/java/com/manhwa/tracker/webtoons/repository/MetricSnapshotRepository.java`.
+- 2026-02-14: Tapas genre ingestion added:
+  - `TapasSeriesReader` now extracts genres from Tapas payload (`mainGenre.value` + `genreList[].value`) into `TapasSeriesDTO.genre`.
+  - `TapasSeriesProcessor` now merges Tapas genres into `manhwas.genre` (deduped, case-insensitive token key) after MU enrichment.
+  - Files:
+    - `src/main/java/com/manhwa/tracker/webtoons/model/TapasSeriesDTO.java`
+    - `src/main/java/com/manhwa/tracker/webtoons/batch/TapasSeriesReader.java`
+    - `src/main/java/com/manhwa/tracker/webtoons/batch/TapasSeriesProcessor.java`
+- 2026-02-14: Tapas tag-to-genre mapping added:
+  - Tapas reader now also consumes potential tag fields (`tagList`, `tags`, `hashTagList`, `hashtagList`, `hashTags`) when present.
+- 2026-02-14: Tapas info-page genre fallback added:
+  - `TapasSeriesReader` now also requests each series `/info` page and parses the `Genres` chip section (`p.detail-row__header` -> `Genres`) to merge additional values into `TapasSeriesDTO.genre`.
+  - This path is controlled by:
+    - `app.tapas.info-genre.enabled` (default `true`)
+    - `app.tapas.info-request-delay-ms` (default `120`)
+  - Values are normalized through existing tag cleanup (leading `#` removed) and merged deduped with API genres.
+- 2026-02-14: Webtoons scraper configuration parity added:
+  - `WebtoonsReader` no longer hardcodes source URL/UA and now uses properties:
+    - `app.webtoons.base-url`
+    - `app.webtoons.popular-path`
+    - `app.webtoons.user-agent`
+    - `app.webtoons.request-timeout-ms`
+    - `app.webtoons.max-items` (depth control for top entries; `<=0` means all rows on page)
+  - Webtoons scheduler now supports dedicated cron override:
+    - `app.webtoons.cron` (fallback to `app.snapshot.cron`).
+- 2026-02-14: Ranking genre exclusions moved to config:
+  - Trending SQL no longer hardcodes excluded genres.
+  - New property in `application.properties`:
+    - `app.ranking.excluded-genres` (comma-separated list).
+  - `TrendingService` converts this list into a case-insensitive regex and passes it to `MetricSnapshotRepository.findTrending`.
+  - Matching is tolerant to spaces/hyphens for multi-word genres.
+  - Tag values are normalized before merging into `genre` (leading `#` removed).
+  - Implemented in `src/main/java/com/manhwa/tracker/webtoons/batch/TapasSeriesReader.java`.
+- 2026-02-14: Tapas ranking mode switched to absolute growth:
+  - Frontend Tapas panel now requests `/api/trending` with `mode=ABS` (raw growth) instead of `RATE` (growth/day).
+  - File: `ui/src/App.tsx`.
+- 2026-02-14: Tapas batch failure fix (external ID upsert):
+  - Root cause of recent `tapasScrapeJob` failures: `org.hibernate.AssertionFailure` after a failed `ManhwaExternalId` insert (constraint conflict left a null-id entity in session).
+  - `TapasSeriesProcessor.upsertExternalId` now avoids conflicting inserts:
+    - First updates existing `(manhwa_id, TAPAS)` row when present.
+    - Then checks global `(source, external_id)` row.
+    - Inserts only when neither exists.
+  - File: `src/main/java/com/manhwa/tracker/webtoons/batch/TapasSeriesProcessor.java`.
+- 2026-02-14: Ranking exclusion list expanded again:
+  - Excluded genres now include: `Ecchi`, `Hentai`, `Adult`, `Shoujo`, `Shoujo Ai`, `Shounen Ai`, `Slice of life`, `Yaoi`, `Yuri`, `LGBTQ+`, `Romance` (plus previous exclusions).
+  - Implemented in `src/main/java/com/manhwa/tracker/webtoons/repository/MetricSnapshotRepository.java` using case-insensitive regex token matching.
 - 2026-02-14: MangaUpdates enrichment integrated across all scrape processors:
   - New service: `src/main/java/com/manhwa/tracker/webtoons/service/MangaUpdatesEnrichmentService.java`.
   - Called from `TapasSeriesProcessor`, `WebtoonsProcessor`, and `AsuraSeriesProcessor` after title resolution.

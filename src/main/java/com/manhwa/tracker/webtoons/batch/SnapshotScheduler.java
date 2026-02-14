@@ -25,7 +25,7 @@ public class SnapshotScheduler {
         this.tapasScrapeJob = tapasScrapeJob;
     }
 
-    @Scheduled(cron = "${app.snapshot.cron}", zone = "${app.snapshot.zone:UTC}")
+    @Scheduled(cron = "${app.webtoons.cron:${app.snapshot.cron}}", zone = "${app.snapshot.zone:UTC}")
     public void runWeeklySnapshot() throws Exception {
         JobParameters params = new JobParametersBuilder()
                 .addString("JobID", String.valueOf(System.currentTimeMillis()))

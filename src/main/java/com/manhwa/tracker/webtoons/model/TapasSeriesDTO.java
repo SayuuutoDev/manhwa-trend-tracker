@@ -12,6 +12,7 @@ public class TapasSeriesDTO {
     private String seriesUrl;
     private String title;
     private String languageCode;
+    private String genre;
     private String coverImageUrl;
     private Long viewCount;
     private Long subscriberCount;

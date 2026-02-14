@@ -32,7 +32,7 @@ const trendingPanels: TrendingPanel[] = [
     caption: "Tapas views climbing fastest",
     value: "VIEWS",
     sourceId: 3,
-    rankingMode: "RATE",
+    rankingMode: "ABS",
     headline: "Tapas.io growth ranking, live.",
     description:
       "Track the fastest-moving Tapas titles by view growth and switch between source leaderboards without leaving the trending screen."

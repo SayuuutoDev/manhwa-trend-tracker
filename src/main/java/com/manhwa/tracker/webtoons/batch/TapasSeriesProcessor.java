@@ -15,13 +15,14 @@ import com.manhwa.tracker.webtoons.service.MangaUpdatesEnrichmentService;
 import com.manhwa.tracker.webtoons.service.TitleNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.item.ItemProcessor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Component
@@ -52,6 +53,7 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
         upsertAlias(manhwaId, dto);
         coverSelectionService.upsertCoverCandidate(manhwaId, TitleSource.TAPAS, dto.getCoverImageUrl());
         mangaUpdatesEnrichmentService.enrichManhwa(manhwaId, dto.getTitle());
+        applyTapasGenres(manhwaId, dto.getGenre());
 
         List<MetricSnapshot> snapshots = new ArrayList<>(3);
         LocalDateTime now = LocalDateTime.now();
@@ -101,6 +103,25 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
             return;
         }
         String seriesUrl = "https://tapas.io/series/" + seriesId;
+        Optional<ManhwaExternalId> existingForManhwa = manhwaExternalIdRepository
+                .findByManhwaIdAndSource(manhwaId, TitleSource.TAPAS);
+        if (existingForManhwa.isPresent()) {
+            ManhwaExternalId row = existingForManhwa.get();
+            boolean changed = false;
+            if (!seriesId.equals(row.getExternalId())) {
+                row.setExternalId(seriesId);
+                changed = true;
+            }
+            if (row.getUrl() == null || row.getUrl().isBlank() || !seriesUrl.equals(row.getUrl())) {
+                row.setUrl(seriesUrl);
+                changed = true;
+            }
+            if (changed) {
+                manhwaExternalIdRepository.save(row);
+            }
+            return;
+        }
+
         Optional<ManhwaExternalId> existing = manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.TAPAS, seriesId);
         if (existing.isPresent()) {
             ManhwaExternalId external = existing.get();
@@ -110,10 +131,7 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
             }
             return;
         }
-        try {
-            manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.TAPAS, seriesId, seriesUrl));
-        } catch (DataIntegrityViolationException ignored) {
-        }
+        manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.TAPAS, seriesId, seriesUrl));
     }
 
     private void upsertAlias(Long manhwaId, TapasSeriesDTO dto) {
@@ -140,6 +158,51 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
         alias.setLanguage(language);
         alias.setCanonical(false);
         manhwaTitleRepository.save(alias);
+    }
+
+    private void applyTapasGenres(Long manhwaId, String tapasGenreCsv) {
+        if (tapasGenreCsv == null || tapasGenreCsv.isBlank()) {
+            return;
+        }
+        manhwaRepository.findById(manhwaId).ifPresent(manhwa -> {
+            String merged = mergeGenres(manhwa.getGenre(), tapasGenreCsv);
+            if (merged != null && !merged.equals(manhwa.getGenre())) {
+                manhwa.setGenre(merged);
+                manhwaRepository.save(manhwa);
+            }
+        });
+    }
+
+    private String mergeGenres(String existing, String incoming) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String token : splitGenres(existing)) {
+            values.putIfAbsent(canonicalKey(token), token);
+        }
+        for (String token : splitGenres(incoming)) {
+            values.putIfAbsent(canonicalKey(token), token);
+        }
+        if (values.isEmpty()) {
+            return null;
+        }
+        return String.join(", ", values.values());
+    }
+
+    private List<String> splitGenres(String genreCsv) {
+        if (genreCsv == null || genreCsv.isBlank()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (String part : genreCsv.split(",")) {
+            String token = part == null ? "" : part.trim();
+            if (!token.isEmpty()) {
+                values.add(token);
+            }
+        }
+        return values;
+    }
+
+    private String canonicalKey(String value) {
+        return value.toLowerCase().replaceAll("\\s+", " ").trim();
     }
 
     @PreDestroy

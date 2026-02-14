@@ -71,6 +71,12 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
                 LIMIT 1
             ) r ON TRUE
             WHERE l.captured_at >= NOW() - INTERVAL '3 days'
+              AND (
+                  m.genre IS NULL
+                  OR :excludedGenresRegex IS NULL
+                  OR :excludedGenresRegex = ''
+                  OR m.genre !~* :excludedGenresRegex
+              )
               AND EXTRACT(EPOCH FROM (l.captured_at - p.captured_at)) >= 21600
             ORDER BY CASE
                          WHEN :rankingMode = 'ABS' THEN (l.metric_value - p.metric_value)::numeric
@@ -90,6 +96,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
             @Param("metricType") String metricType,
             @Param("sourceId") Integer sourceId,
             @Param("limit") int limit,
-            @Param("rankingMode") String rankingMode
+            @Param("rankingMode") String rankingMode,
+            @Param("excludedGenresRegex") String excludedGenresRegex
     );
 }

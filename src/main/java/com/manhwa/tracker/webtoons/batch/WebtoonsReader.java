@@ -8,7 +8,9 @@ import org.jsoup.select.Elements;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.annotation.BeforeStep;
 import org.springframework.batch.item.ItemReader;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +18,21 @@ import java.util.List;
 public class WebtoonsReader implements ItemReader<ManhwaDTO> {
     private List<ManhwaDTO> data = new ArrayList<>();
     private int index = 0;
+
+    @Value("${app.webtoons.base-url:https://www.webtoons.com}")
+    private String baseUrl;
+
+    @Value("${app.webtoons.popular-path:/en/popular}")
+    private String popularPath;
+
+    @Value("${app.webtoons.user-agent:Mozilla/5.0}")
+    private String userAgent;
+
+    @Value("${app.webtoons.request-timeout-ms:20000}")
+    private int requestTimeoutMs;
+
+    @Value("${app.webtoons.max-items:30}")
+    private int maxItems;
 
     @BeforeStep
     public void beforeStep(StepExecution stepExecution) {
@@ -26,28 +43,22 @@ public class WebtoonsReader implements ItemReader<ManhwaDTO> {
     @Override
     public ManhwaDTO read() throws Exception {
         if (data.isEmpty()) {
-            // 1. Connect with a User-Agent to avoid being blocked
-            Document doc = Jsoup.connect("https://www.webtoons.com/en/popular")
-                    .userAgent("Mozilla/5.0")
+            String popularUrl = buildPopularUrl();
+            Document doc = Jsoup.connect(popularUrl)
+                    .userAgent(userAgent)
+                    .timeout(Math.max(1000, requestTimeoutMs))
                     .get();
 
-            // 1. Target the list items inside the <ul>
             Elements rows = doc.select(".webtoon_list li");
+            int depth = maxItems <= 0 ? rows.size() : Math.min(maxItems, rows.size());
+            System.out.println("DEBUG: Found " + rows.size() + " webtoons at " + popularUrl + ", ingesting " + depth + ".");
 
-            System.out.println("DEBUG: Found " + rows.size() + " webtoons in the list.");
-
-            for (Element row : rows) {
-                // 2. Select the Title inside the <strong class="title">
+            for (int i = 0; i < depth; i++) {
+                Element row = rows.get(i);
                 String title = row.select(".info_text .title").text();
-
-                // 3. Select the View Count inside the <div class="view_count">
-                String viewsRaw = row.select(".view_count").text().trim(); // e.g., "1.5M" or "93,304"
-
-                // 4. We look for the <img> tag and get the 'src' attribute
+                String viewsRaw = row.select(".view_count").text().trim();
                 String coverImageUrl = row.select(".image_wrap img").attr("src");
                 String seriesUrl = row.select("a").attr("abs:href");
-
-                // 5. Genre
                 String genre = row.select(".genre").text();
                 if (!title.isEmpty()) {
                     Long views = parseViews(viewsRaw);
@@ -64,7 +75,18 @@ public class WebtoonsReader implements ItemReader<ManhwaDTO> {
         return null;
     }
 
-    // Helper method to handle "1.5M" -> 1500000
+    private String buildPopularUrl() {
+        String normalizedBase = baseUrl == null ? "" : baseUrl.trim();
+        String normalizedPath = popularPath == null ? "" : popularPath.trim();
+        if (normalizedBase.endsWith("/") && normalizedPath.startsWith("/")) {
+            return normalizedBase.substring(0, normalizedBase.length() - 1) + normalizedPath;
+        }
+        if (!normalizedBase.endsWith("/") && !normalizedPath.startsWith("/")) {
+            return normalizedBase + "/" + normalizedPath;
+        }
+        return normalizedBase + normalizedPath;
+    }
+
     private Long parseViews(String viewsRaw) {
         if (viewsRaw == null || viewsRaw.isEmpty()) return 0L;
 
