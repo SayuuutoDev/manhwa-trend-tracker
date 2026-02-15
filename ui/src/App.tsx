@@ -434,6 +434,9 @@ export default function App() {
                     <div className="trend-growth">
                       <span className="label">Growth</span>
                       <span className="value">+{formatter.format(item.growth)}</span>
+                      <span className="timestamp">
+                        {Number.isFinite(item.growthPerDay) ? `+${formatter.format(item.growthPerDay)}/day` : "-"}
+                      </span>
                       <span className="timestamp">{formatDate(item.latestAt)}</span>
                     </div>
                   </>
