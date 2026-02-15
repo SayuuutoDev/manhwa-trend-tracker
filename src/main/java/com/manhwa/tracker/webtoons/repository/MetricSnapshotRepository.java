@@ -13,7 +13,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
     @Query(value = """
             SELECT m.id AS manhwaId,
                    m.canonical_title AS title,
-                   m.cover_image_url AS coverImageUrl,
+                   COALESCE(NULLIF(m.cover_image_url, ''), '/images/cover-fallback.svg') AS coverImageUrl,
                    r.read_url AS readUrl,
                    l.metric_value AS latestValue,
                    l.captured_at AS latestAt,

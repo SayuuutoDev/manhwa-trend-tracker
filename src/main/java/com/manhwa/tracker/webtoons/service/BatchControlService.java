@@ -14,8 +14,11 @@ import org.springframework.batch.core.launch.JobExecutionNotRunningException;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.launch.NoSuchJobExecutionException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -35,15 +38,21 @@ public class BatchControlService {
     private final JobLauncher jobLauncher;
     private final JobExplorer jobExplorer;
     private final JobOperator jobOperator;
+    private final JdbcTemplate jdbcTemplate;
     private final Map<String, Job> jobsByBatchName;
+    private final long staleExecutionSeconds;
 
     public BatchControlService(JobLauncher jobLauncher,
                                JobExplorer jobExplorer,
                                JobOperator jobOperator,
-                               Map<String, Job> jobsByName) {
+                               JdbcTemplate jdbcTemplate,
+                               Map<String, Job> jobsByName,
+                               @Value("${app.batch.stale-execution-seconds:300}") long staleExecutionSeconds) {
         this.jobLauncher = jobLauncher;
         this.jobExplorer = jobExplorer;
         this.jobOperator = jobOperator;
+        this.jdbcTemplate = jdbcTemplate;
+        this.staleExecutionSeconds = staleExecutionSeconds;
         this.jobsByBatchName = new HashMap<>();
         for (Job job : jobsByName.values()) {
             jobsByBatchName.put(job.getName(), job);
@@ -68,6 +77,7 @@ public class BatchControlService {
             throw new IllegalArgumentException("Unknown job: " + jobName);
         }
 
+        reconcileStaleRunningExecutions(jobName);
         Set<JobExecution> running = jobExplorer.findRunningJobExecutions(jobName);
         if (!running.isEmpty()) {
             Long runningId = running.stream().map(JobExecution::getId).max(Comparator.naturalOrder()).orElse(null);
@@ -85,6 +95,7 @@ public class BatchControlService {
     public BatchStartResponse stopJob(String jobName) throws Exception {
         assertKnownJob(jobName);
 
+        reconcileStaleRunningExecutions(jobName);
         Set<JobExecution> running = jobExplorer.findRunningJobExecutions(jobName);
         if (running.isEmpty()) {
             throw new IllegalStateException("Job is not running: " + jobName);
@@ -118,6 +129,7 @@ public class BatchControlService {
     }
 
     private BatchJobView toView(String jobName) {
+        reconcileStaleRunningExecutions(jobName);
         Set<JobExecution> runningExecutions = jobExplorer.findRunningJobExecutions(jobName);
         Optional<JobExecution> latestExecution = latestExecution(jobName);
 
@@ -213,5 +225,74 @@ public class BatchControlService {
             return 100;
         }
         return null;
+    }
+
+    private void reconcileStaleRunningExecutions(String jobName) {
+        if (staleExecutionSeconds <= 0) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime staleThreshold = now.minusSeconds(staleExecutionSeconds);
+
+        Set<JobExecution> runningExecutions = jobExplorer.findRunningJobExecutions(jobName);
+        for (JobExecution execution : runningExecutions) {
+            if (!isStaleExecution(execution, staleThreshold)) {
+                continue;
+            }
+            markExecutionAsFailed(execution.getId(), now);
+        }
+    }
+
+    private boolean isStaleExecution(JobExecution execution, LocalDateTime staleThreshold) {
+        if (execution == null || execution.getId() == null) {
+            return false;
+        }
+        BatchStatus status = execution.getStatus();
+        if (status != BatchStatus.STARTING && status != BatchStatus.STARTED && status != BatchStatus.STOPPING) {
+            return false;
+        }
+        if (execution.getEndTime() != null) {
+            return false;
+        }
+        LocalDateTime heartbeat = execution.getLastUpdated();
+        if (heartbeat == null) {
+            heartbeat = execution.getStartTime();
+        }
+        return heartbeat != null && heartbeat.isBefore(staleThreshold);
+    }
+
+    private void markExecutionAsFailed(Long executionId, LocalDateTime now) {
+        Timestamp ts = Timestamp.valueOf(now);
+        String message = "Marked as FAILED by BatchControlService: stale execution heartbeat";
+
+        jdbcTemplate.update(
+                """
+                UPDATE batch_step_execution
+                   SET status = 'FAILED',
+                       exit_code = 'FAILED',
+                       exit_message = ?,
+                       end_time = COALESCE(end_time, ?),
+                       last_updated = ?,
+                       version = version + 1
+                 WHERE job_execution_id = ?
+                   AND status IN ('STARTING', 'STARTED', 'STOPPING')
+                """,
+                message, ts, ts, executionId
+        );
+
+        jdbcTemplate.update(
+                """
+                UPDATE batch_job_execution
+                   SET status = 'FAILED',
+                       exit_code = 'FAILED',
+                       exit_message = ?,
+                       end_time = COALESCE(end_time, ?),
+                       last_updated = ?,
+                       version = version + 1
+                 WHERE job_execution_id = ?
+                   AND status IN ('STARTING', 'STARTED', 'STOPPING')
+                """,
+                message, ts, ts, executionId
+        );
     }
 }
