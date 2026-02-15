@@ -28,15 +28,38 @@ public class TrendingService {
             MetricType metricType,
             Integer sourceId,
             int limit,
-            TrendingRankingMode rankingMode
+            TrendingRankingMode rankingMode,
+            Long minPreviousValue
     ) {
-        List<TrendingProjection> rows = metricSnapshotRepository.findTrending(
-                metricType.name(),
-                sourceId,
-                limit,
-                rankingMode.name(),
-                excludedGenresRegex
-        );
+        List<TrendingProjection> rows = switch (rankingMode) {
+            case TOTAL -> metricSnapshotRepository.findTrendingTotal(
+                    metricType.name(),
+                    sourceId,
+                    limit,
+                    excludedGenresRegex
+            );
+            case ENGAGEMENT -> metricSnapshotRepository.findTrendingEngagement(
+                    metricType.name(),
+                    MetricType.VIEWS.name(),
+                    sourceId,
+                    limit,
+                    excludedGenresRegex
+            );
+            case ACCELERATION -> metricSnapshotRepository.findTrendingAcceleration(
+                    metricType.name(),
+                    sourceId,
+                    limit,
+                    excludedGenresRegex
+            );
+            default -> metricSnapshotRepository.findTrendingGrowth(
+                    metricType.name(),
+                    sourceId,
+                    limit,
+                    rankingMode.name(),
+                    excludedGenresRegex,
+                    minPreviousValue
+            );
+        };
         return rows.stream()
                 .map(row -> new TrendingManhwaDTO(
                         row.getManhwaId(),
@@ -52,6 +75,7 @@ public class TrendingService {
                         row.getBaselineDays(),
                         row.getGrowthPerDay(),
                         row.getGrowthPercent(),
+                        row.getRankingScore(),
                         rankingMode
                 ))
                 .toList();

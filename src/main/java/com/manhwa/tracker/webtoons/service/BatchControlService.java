@@ -258,6 +258,15 @@ public class BatchControlService {
         if (heartbeat == null) {
             heartbeat = execution.getStartTime();
         }
+        for (StepExecution stepExecution : execution.getStepExecutions()) {
+            LocalDateTime stepHeartbeat = stepExecution.getLastUpdated();
+            if (stepHeartbeat == null) {
+                stepHeartbeat = stepExecution.getStartTime();
+            }
+            if (stepHeartbeat != null && (heartbeat == null || stepHeartbeat.isAfter(heartbeat))) {
+                heartbeat = stepHeartbeat;
+            }
+        }
         return heartbeat != null && heartbeat.isBefore(staleThreshold);
     }
 

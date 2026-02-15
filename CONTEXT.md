@@ -95,6 +95,15 @@ Last updated: 2026-02-15
 - Removed those URLs from `manhwas.cover_image_url` and `manhwa_cover_candidates`.
 - Re-selected best remaining candidates where available.
 
+- Asura unmatched titles were skipped when not already linked in local DB.
+- Fix: Asura processor now attempts MangaUpdates lookup and will resolve/create a `manhwas` row before writing snapshots.
+- Fallback behavior: if MangaUpdates has no match, a minimal canonical row is created from Asura title so the series is still ingested.
+
+- Some Asura/MangaUpdates descriptions were persisted as placeholder artifacts (e.g. `[object Object]`, punctuation-only strings).
+- Fixes:
+- Description sanitization now strips known placeholder tokens and low-signal leading artifacts before persistence.
+- Cleanup performed to normalize previously affected rows.
+
 ## 7) Coding Instructions For Future Changes
 - Keep source-of-truth logic in backend; frontend should stay presentation-focused.
 - For any new source integration:

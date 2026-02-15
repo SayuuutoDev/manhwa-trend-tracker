@@ -15,4 +15,5 @@ public interface TrendingProjection {
     Double getBaselineDays();
     Double getGrowthPerDay();
     Double getGrowthPercent();
+    Double getRankingScore();
 }

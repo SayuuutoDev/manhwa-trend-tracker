@@ -21,5 +21,6 @@ public class TrendingManhwaDTO {
     private Double baselineDays;
     private Double growthPerDay;
     private Double growthPercent;
+    private Double rankingScore;
     private TrendingRankingMode rankingMode;
 }

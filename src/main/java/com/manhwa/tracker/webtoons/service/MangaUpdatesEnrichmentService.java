@@ -9,8 +9,10 @@ import com.manhwa.tracker.webtoons.model.TitleSource;
 import com.manhwa.tracker.webtoons.repository.ManhwaExternalIdRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaTitleRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.net.URI;
@@ -59,6 +61,9 @@ public class MangaUpdatesEnrichmentService {
     @Value("${app.mangaupdates.search.max-results:10}")
     private int maxSearchResults;
 
+    @Value("${app.mangaupdates.search.min-score:700}")
+    private int minSearchScore;
+
     private long lastRequestAt = 0L;
 
     public MangaUpdatesEnrichmentService(ManhwaRepository manhwaRepository,
@@ -92,6 +97,61 @@ public class MangaUpdatesEnrichmentService {
         updateManhwa(manhwa, data);
     }
 
+    @Transactional
+    public Long resolveOrCreateManhwaByTitle(String titleHint) {
+        if (titleHint == null || titleHint.isBlank()) {
+            return null;
+        }
+
+        Long existingByTitle = findExistingManhwaIdByTitle(titleHint);
+        if (existingByTitle != null) {
+            enrichManhwa(existingByTitle, titleHint);
+            return existingByTitle;
+        }
+
+        if (!enabled) {
+            Manhwa created = createOrFindByCanonicalTitle(titleHint);
+            return created == null ? null : created.getId();
+        }
+
+        Optional<MangaUpdatesMetadata> metadata = searchSeries(titleHint);
+        if (metadata.isEmpty()) {
+            Manhwa created = createOrFindByCanonicalTitle(titleHint);
+            return created == null ? null : created.getId();
+        }
+
+        MangaUpdatesMetadata data = metadata.get();
+        if (data.seriesId() != null && !data.seriesId().isBlank()) {
+            Optional<ManhwaExternalId> existingBySeries = manhwaExternalIdRepository
+                    .findBySourceAndExternalId(TitleSource.MANGAUPDATES, data.seriesId());
+            if (existingBySeries.isPresent()) {
+                Long manhwaId = existingBySeries.get().getManhwaId();
+                enrichManhwa(manhwaId, titleHint);
+                return manhwaId;
+            }
+        }
+
+        // Preserve the source-provided title as canonical on creation; MU titles become aliases.
+        String canonicalTitle = firstNonBlank(titleHint, data.title());
+        Long existingByMetadataTitle = findExistingManhwaIdByTitle(canonicalTitle);
+        if (existingByMetadataTitle != null) {
+            upsertMangaUpdatesExternalId(existingByMetadataTitle, data.seriesId());
+            upsertAliases(existingByMetadataTitle, data);
+            manhwaRepository.findById(existingByMetadataTitle).ifPresent(manhwa -> updateManhwa(manhwa, data));
+            return existingByMetadataTitle;
+        }
+
+        Manhwa created = createOrFindByCanonicalTitle(canonicalTitle);
+        if (created == null || created.getId() == null) {
+            return null;
+        }
+
+        upsertMangaUpdatesExternalId(created.getId(), data.seriesId());
+        upsertAliases(created.getId(), data);
+        updateManhwa(created, data);
+        return created.getId();
+    }
+
     private Optional<MangaUpdatesMetadata> resolveMetadata(Long manhwaId, String titleHint, String canonicalTitle) {
         List<ManhwaExternalId> existingMuIds = manhwaExternalIdRepository
                 .findAllByManhwaIdAndSource(manhwaId, TitleSource.MANGAUPDATES);
@@ -101,10 +161,11 @@ public class MangaUpdatesEnrichmentService {
                     id -> id.getId() == null ? Long.MIN_VALUE : id.getId(),
                     Comparator.reverseOrder()
             ));
+            String matchContext = firstNonBlank(titleHint, canonicalTitle);
             for (ManhwaExternalId existingMuId : existingMuIds) {
                 Optional<MangaUpdatesMetadata> byId = getSeries(existingMuId.getExternalId());
                 if (byId.isPresent()) {
-                    return byId;
+                    return Optional.of(withMatchedTitle(byId.get(), matchContext));
                 }
             }
         }
@@ -121,10 +182,11 @@ public class MangaUpdatesEnrichmentService {
         if (seriesId == null || seriesId.isBlank()) {
             return Optional.empty();
         }
-        if (!seriesId.chars().allMatch(Character::isDigit)) {
+        String normalizedSeriesId = seriesId.trim();
+        if (!normalizedSeriesId.chars().allMatch(Character::isDigit)) {
             return Optional.empty();
         }
-        return seriesCache.computeIfAbsent(seriesId, id -> {
+        return seriesCache.computeIfAbsent(normalizedSeriesId, id -> {
             try {
                 JsonNode root = requestJson("/v1/series/" + id, "GET", null);
                 return Optional.of(parseMetadata(root));
@@ -153,19 +215,53 @@ public class MangaUpdatesEnrichmentService {
                 List<ScoredMetadata> candidates = new ArrayList<>();
                 int limit = Math.min(maxSearchResults, results.size());
                 for (int i = 0; i < limit; i++) {
-                    JsonNode record = results.get(i).path("record");
+                    JsonNode hit = results.get(i);
+                    JsonNode record = hit.path("record");
                     if (record.isMissingNode()) {
                         continue;
                     }
                     MangaUpdatesMetadata metadata = parseMetadata(record);
-                    int score = titleScore(normalizedTitle, metadata);
-                    candidates.add(new ScoredMetadata(metadata, score));
+                    String hitTitle = text(hit, "hit_title");
+                    MangaUpdatesMetadata scoredMetadata = new MangaUpdatesMetadata(
+                            metadata.seriesId(),
+                            metadata.title(),
+                            metadata.description(),
+                            metadata.coverImageUrl(),
+                            metadata.coverThumbUrl(),
+                            metadata.genreCsv(),
+                            metadata.associatedTitles(),
+                            hitTitle
+                    );
+                    int score = titleScore(normalizedTitle, scoredMetadata, hitTitle);
+                    candidates.add(new ScoredMetadata(scoredMetadata, score));
                 }
 
-                return candidates.stream()
-                        .filter(c -> c.score() >= 350)
-                        .max(Comparator.comparingInt(ScoredMetadata::score))
-                        .map(ScoredMetadata::metadata);
+                List<ScoredMetadata> ranked = candidates.stream()
+                        .sorted(Comparator.comparingInt(ScoredMetadata::score).reversed())
+                        .toList();
+                if (ranked.isEmpty()) {
+                    return Optional.empty();
+                }
+
+                ScoredMetadata bestCandidate = ranked.get(0);
+                if (bestCandidate.score() < minSearchScore) {
+                    return Optional.empty();
+                }
+                if (ranked.size() > 1) {
+                    int secondScore = ranked.get(1).score();
+                    boolean ambiguous = bestCandidate.score() < 900
+                            && (bestCandidate.score() - secondScore) < 80;
+                    if (ambiguous) {
+                        return Optional.empty();
+                    }
+                }
+
+                MangaUpdatesMetadata best = bestCandidate.metadata();
+                Optional<MangaUpdatesMetadata> fullMetadata = getSeries(best.seriesId());
+                if (fullMetadata.isPresent()) {
+                    return Optional.of(mergeMetadata(fullMetadata.get(), best));
+                }
+                return Optional.of(best);
             } catch (Exception ex) {
                 System.out.println("WARN: MangaUpdates search failed for title='" + title + "' : " + ex.getMessage());
                 return Optional.empty();
@@ -173,12 +269,36 @@ public class MangaUpdatesEnrichmentService {
         });
     }
 
-    private int titleScore(String normalizedTarget, MangaUpdatesMetadata metadata) {
+    private int titleScore(String normalizedTarget, MangaUpdatesMetadata metadata, String hitTitle) {
         int best = scoreOne(normalizedTarget, metadata.title());
         for (String alias : metadata.associatedTitles()) {
             best = Math.max(best, scoreOne(normalizedTarget, alias));
         }
+        if (hitTitle != null && !hitTitle.isBlank()) {
+            int hitScore = scoreOne(normalizedTarget, hitTitle);
+            // The search API's hit_title may include aliases not present in "title"/"associated".
+            best = Math.max(best, Math.min(1100, hitScore + 220));
+        }
         return best;
+    }
+
+    private MangaUpdatesMetadata withMatchedTitle(MangaUpdatesMetadata metadata, String matchedTitle) {
+        if (metadata == null) {
+            return null;
+        }
+        if (matchedTitle == null || matchedTitle.isBlank()) {
+            return metadata;
+        }
+        return new MangaUpdatesMetadata(
+                metadata.seriesId(),
+                metadata.title(),
+                metadata.description(),
+                metadata.coverImageUrl(),
+                metadata.coverThumbUrl(),
+                metadata.genreCsv(),
+                metadata.associatedTitles(),
+                matchedTitle
+        );
     }
 
     private int scoreOne(String normalizedTarget, String candidateTitle) {
@@ -268,8 +388,14 @@ public class MangaUpdatesEnrichmentService {
         String cover = firstNonBlank(data.coverImageUrl(), data.coverThumbUrl());
         coverSelectionService.upsertCoverCandidate(manhwa.getId(), TitleSource.MANGAUPDATES, cover);
 
-        if (data.description() != null && !data.description().isBlank() && !data.description().equals(manhwa.getDescription())) {
-            manhwa.setDescription(data.description());
+        if (shouldPromoteCanonicalTitle(manhwa, data)) {
+            manhwa.setCanonicalTitle(data.title().trim());
+            changed = true;
+        }
+
+        String sanitizedDescription = sanitizeDescription(data.description());
+        if (sanitizedDescription != null && !sanitizedDescription.equals(manhwa.getDescription())) {
+            manhwa.setDescription(sanitizedDescription);
             changed = true;
         }
 
@@ -283,10 +409,32 @@ public class MangaUpdatesEnrichmentService {
         }
     }
 
+    private boolean shouldPromoteCanonicalTitle(Manhwa manhwa, MangaUpdatesMetadata data) {
+        if (manhwa == null || data == null || data.title() == null || data.title().isBlank()) {
+            return false;
+        }
+        String currentCanonical = manhwa.getCanonicalTitle();
+        String targetCanonical = data.title().trim();
+        if (currentCanonical == null || currentCanonical.isBlank()) {
+            return true;
+        }
+        if (targetCanonical.equals(currentCanonical)) {
+            return false;
+        }
+        boolean matchedViaHitTitle = data.matchedTitle() != null
+                && !data.matchedTitle().isBlank()
+                && TitleNormalizer.normalize(currentCanonical).equals(TitleNormalizer.normalize(data.matchedTitle()));
+        if (!matchedViaHitTitle) {
+            return false;
+        }
+        Optional<Manhwa> existing = manhwaRepository.findByCanonicalTitle(targetCanonical);
+        return existing.isEmpty() || existing.get().getId().equals(manhwa.getId());
+    }
+
     private MangaUpdatesMetadata parseMetadata(JsonNode root) {
         String seriesId = text(root, "series_id");
         String title = text(root, "title");
-        String description = text(root, "description");
+        String description = extractText(root.path("description"));
         String coverOriginal = text(root.path("image").path("url"), "original");
         String coverThumb = text(root.path("image").path("url"), "thumb");
         String genreCsv = parseGenres(root.path("genres"));
@@ -306,7 +454,32 @@ public class MangaUpdatesEnrichmentService {
                 coverOriginal,
                 coverThumb,
                 genreCsv,
-                List.copyOf(associated)
+                List.copyOf(associated),
+                null
+        );
+    }
+
+    private MangaUpdatesMetadata mergeMetadata(MangaUpdatesMetadata detailed, MangaUpdatesMetadata fallback) {
+        if (detailed == null) {
+            return fallback;
+        }
+        if (fallback == null) {
+            return detailed;
+        }
+
+        LinkedHashSet<String> associated = new LinkedHashSet<>();
+        associated.addAll(fallback.associatedTitles());
+        associated.addAll(detailed.associatedTitles());
+
+        return new MangaUpdatesMetadata(
+                firstNonBlank(detailed.seriesId(), fallback.seriesId()),
+                firstNonBlank(detailed.title(), fallback.title()),
+                firstNonBlank(detailed.description(), fallback.description()),
+                firstNonBlank(detailed.coverImageUrl(), fallback.coverImageUrl()),
+                firstNonBlank(detailed.coverThumbUrl(), fallback.coverThumbUrl()),
+                firstNonBlank(detailed.genreCsv(), fallback.genreCsv()),
+                List.copyOf(associated),
+                fallback.matchedTitle()
         );
     }
 
@@ -325,6 +498,49 @@ public class MangaUpdatesEnrichmentService {
             return null;
         }
         return String.join(", ", genres);
+    }
+
+    private String extractText(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual() || node.isNumber() || node.isBoolean()) {
+            String value = node.asText(null);
+            return value == null || value.isBlank() ? null : value;
+        }
+        if (node.isArray()) {
+            List<String> pieces = new ArrayList<>();
+            for (JsonNode child : node) {
+                String value = extractText(child);
+                if (value != null && !value.isBlank()) {
+                    pieces.add(value.trim());
+                }
+            }
+            if (pieces.isEmpty()) {
+                return null;
+            }
+            return String.join("\n\n", pieces);
+        }
+        if (node.isObject()) {
+            String[] preferredFields = {"formatted", "text", "raw", "description", "value", "en", "default"};
+            for (String field : preferredFields) {
+                String value = extractText(node.path(field));
+                if (value != null && !value.isBlank()) {
+                    return value;
+                }
+            }
+            List<String> objectValues = new ArrayList<>();
+            node.fields().forEachRemaining(entry -> {
+                String value = extractText(entry.getValue());
+                if (value != null && !value.isBlank()) {
+                    objectValues.add(value.trim());
+                }
+            });
+            if (!objectValues.isEmpty()) {
+                return String.join("\n\n", objectValues);
+            }
+        }
+        return null;
     }
 
     private synchronized JsonNode requestJson(String path, String method, String body) throws IOException, InterruptedException {
@@ -398,6 +614,60 @@ public class MangaUpdatesEnrichmentService {
         return null;
     }
 
+    private String sanitizeDescription(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String cleaned = raw
+                .replaceAll("(?i)\\[object\\s*object\\]", " ")
+                .replace("\r", " ")
+                .replaceAll("\\s+\\n", "\n")
+                .replaceAll("\\n\\s+", "\n")
+                .replaceAll("[ \\t]+", " ")
+                .replaceAll("(,\\s*){2,}", ", ")
+                .replaceAll("^[\\s\\uFEFF\\u200B]*[,;:]+\\s*", "")
+                .trim();
+        if (cleaned.isBlank()) {
+            return null;
+        }
+        long letterOrDigitCount = cleaned.chars().filter(Character::isLetterOrDigit).count();
+        if (letterOrDigitCount < 20) {
+            return null;
+        }
+        return cleaned;
+    }
+
+    private Long findExistingManhwaIdByTitle(String title) {
+        if (title == null || title.isBlank()) {
+            return null;
+        }
+        String normalized = TitleNormalizer.normalize(title);
+        if (!normalized.isBlank()) {
+            List<ManhwaTitle> matches = manhwaTitleRepository.findByNormalizedTitle(normalized);
+            if (!matches.isEmpty()) {
+                return matches.get(0).getManhwaId();
+            }
+        }
+        return manhwaRepository.findByCanonicalTitle(title)
+                .map(Manhwa::getId)
+                .orElse(null);
+    }
+
+    private Manhwa createOrFindByCanonicalTitle(String canonicalTitle) {
+        if (canonicalTitle == null || canonicalTitle.isBlank()) {
+            return null;
+        }
+        Manhwa existing = manhwaRepository.findByCanonicalTitle(canonicalTitle).orElse(null);
+        if (existing != null) {
+            return existing;
+        }
+        try {
+            return manhwaRepository.save(new Manhwa(canonicalTitle));
+        } catch (DataIntegrityViolationException ex) {
+            return manhwaRepository.findByCanonicalTitle(canonicalTitle).orElse(null);
+        }
+    }
+
     private record MangaUpdatesMetadata(
             String seriesId,
             String title,
@@ -405,7 +675,8 @@ public class MangaUpdatesEnrichmentService {
             String coverImageUrl,
             String coverThumbUrl,
             String genreCsv,
-            List<String> associatedTitles
+            List<String> associatedTitles,
+            String matchedTitle
     ) {
     }
 

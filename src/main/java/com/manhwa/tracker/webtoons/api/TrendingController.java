@@ -25,9 +25,10 @@ public class TrendingController {
             @RequestParam(name = "metric", defaultValue = "VIEWS") MetricType metric,
             @RequestParam(name = "limit", defaultValue = "10") int limit,
             @RequestParam(name = "sourceId", required = false) Integer sourceId,
-            @RequestParam(name = "mode", defaultValue = "RATE") TrendingRankingMode mode
+            @RequestParam(name = "mode", defaultValue = "RATE") TrendingRankingMode mode,
+            @RequestParam(name = "minPreviousValue", required = false) Long minPreviousValue
     ) {
         int cappedLimit = Math.min(Math.max(limit, 1), 100);
-        return trendingService.getTrending(metric, sourceId, cappedLimit, mode);
+        return trendingService.getTrending(metric, sourceId, cappedLimit, mode, minPreviousValue);
     }
 }

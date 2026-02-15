@@ -1,60 +1,148 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { fetchBatchJobs, fetchTrending, startBatchJob, stopBatchJob } from "./api";
 import { BatchJob, MetricType, RankingMode, TrendingManhwa } from "./types";
 import defaultCover from "./assets/default-cover.svg";
 
 type TrendingPanel = {
-  id: "asura" | "tapas" | "webtoon";
+  id: string;
   label: string;
   caption: string;
   value: MetricType;
-  sourceId: number;
   rankingMode: RankingMode;
+  minPreviousValue?: number;
   headline: string;
   description: string;
 };
 
-const trendingPanels: TrendingPanel[] = [
-  {
-    id: "asura",
-    label: "Asura Pulse",
-    caption: "Followers surging right now",
-    value: "FOLLOWERS",
-    sourceId: 2,
-    rankingMode: "RATE",
-    headline: "Asura's hottest climbs, framed in neon.",
-    description:
-      "A high-voltage leaderboard designed for instant obsession. Bigger covers, sharper motion, and the fastest-rising series at a glance."
-  },
-  {
-    id: "tapas",
-    label: "Tapas Growth",
-    caption: "Tapas views climbing fastest",
-    value: "VIEWS",
-    sourceId: 3,
-    rankingMode: "ABS",
-    headline: "Tapas.io growth ranking, live.",
-    description:
-      "Track the fastest-moving Tapas titles by view growth and switch between source leaderboards without leaving the trending screen."
-  },
-  {
-    id: "webtoon",
-    label: "Webtoon Growth",
-    caption: "Webtoon views climbing fastest",
-    value: "VIEWS",
-    sourceId: 1,
-    rankingMode: "RATE",
-    headline: "Webtoon growth ranking, live.",
-    description:
-      "See which Webtoon titles are accelerating right now using a rate-based growth window close to one week."
-  }
-];
-const jobOrder = ["asuraScrapeJob", "webtoonsScrapeJob", "tapasScrapeJob"];
+type SourcePanel = {
+  id: number;
+  label: string;
+};
 
 type Page = "trending" | "batches";
 
-const formatter = new Intl.NumberFormat("en-US", { notation: "compact" });
+const trendingPanels: TrendingPanel[] = [
+  {
+    id: "velocity",
+    label: "Velocity",
+    caption: "Fastest daily growth",
+    value: "VIEWS",
+    rankingMode: "RATE",
+    headline: "Growth velocity ranking.",
+    description: "Ranks titles by normalized daily growth."
+  },
+  {
+    id: "most_followed",
+    label: "Most Followed",
+    caption: "Top follower totals",
+    value: "FOLLOWERS",
+    rankingMode: "TOTAL",
+    headline: "Top series by followers.",
+    description: "Scale ranking by latest follower count."
+  },
+  {
+    id: "most_liked",
+    label: "Most Liked",
+    caption: "Top like totals",
+    value: "LIKES",
+    rankingMode: "TOTAL",
+    headline: "Top series by likes.",
+    description: "Scale ranking by latest like count."
+  },
+  {
+    id: "most_subscribed",
+    label: "Most Subscribed",
+    caption: "Top subscriber totals",
+    value: "SUBSCRIBERS",
+    rankingMode: "TOTAL",
+    headline: "Top series by subscribers.",
+    description: "Scale ranking by latest subscriber count."
+  },
+  {
+    id: "breakout",
+    label: "Most Trending",
+    caption: "Breakout percent growth",
+    value: "VIEWS",
+    rankingMode: "PCT",
+    minPreviousValue: 50000,
+    headline: "Breakout movers across all sources.",
+    description: "Percent-growth ranking with a baseline floor to reduce noise from tiny titles."
+  },
+  {
+    id: "engagement_likes_views",
+    label: "Engagement",
+    caption: "Likes per view ratio",
+    value: "LIKES",
+    rankingMode: "ENGAGEMENT",
+    headline: "Engagement ranking by likes/view.",
+    description: "Ranks titles by latest likes-to-views efficiency."
+  },
+  {
+    id: "engagement_subs_views",
+    label: "Retention Intent",
+    caption: "Subscribers per view ratio",
+    value: "SUBSCRIBERS",
+    rankingMode: "ENGAGEMENT",
+    headline: "Retention ranking by subscribers/view.",
+    description: "Ranks titles by latest subscribers-to-views efficiency."
+  },
+  {
+    id: "acceleration",
+    label: "Acceleration",
+    caption: "Growth rate speeding up",
+    value: "VIEWS",
+    rankingMode: "ACCELERATION",
+    headline: "Acceleration ranking, live.",
+    description: "Ranks titles by change in growth-per-day between recent and prior windows."
+  }
+];
+
+const sourcePanels: SourcePanel[] = [
+  { id: 1, label: "Webtoons" },
+  { id: 2, label: "Asura" },
+  { id: 3, label: "Tapas" }
+];
+
+function isPanelSupportedBySource(panelId: string, sourceId: number) {
+  if (sourceId === 2 && panelId === "most_subscribed") {
+    return false;
+  }
+  if (sourceId !== 2 && panelId === "most_followed") {
+    return false;
+  }
+  if (panelId === "most_liked" || panelId === "engagement_likes_views" || panelId === "engagement_subs_views") {
+    return sourceId === 3;
+  }
+  if (panelId === "most_followed" || panelId === "most_subscribed") {
+    return sourceId === 2 || sourceId === 3;
+  }
+  return true;
+}
+
+function resolveMetricForPanel(panel: TrendingPanel, sourceId: number): MetricType {
+  if (panel.id === "most_followed" || panel.id === "most_subscribed") {
+    return sourceId === 2 ? "FOLLOWERS" : "SUBSCRIBERS";
+  }
+  if (panel.id === "velocity" || panel.id === "breakout" || panel.id === "acceleration") {
+    return sourceId === 2 ? "FOLLOWERS" : "VIEWS";
+  }
+  return panel.value;
+}
+
+function resolveMinPreviousForPanel(panel: TrendingPanel, sourceId: number) {
+  if (panel.id === "breakout" && sourceId === 2) {
+    return 5000;
+  }
+  return panel.minPreviousValue;
+}
+
+const jobOrder = ["asuraScrapeJob", "webtoonsScrapeJob", "tapasScrapeJob"];
 const badges = ["Crown", "Hot", "Rising"];
+const formatter = new Intl.NumberFormat("en-US", { notation: "compact" });
+
+function pageFromPath(pathname: string): Page {
+  return pathname === "/batches" ? "batches" : "trending";
+}
 
 function formatDate(value: string | null) {
   if (!value) return "-";
@@ -69,31 +157,53 @@ function formatDate(value: string | null) {
   });
 }
 
-function pageFromPath(pathname: string): Page {
-  return pathname === "/batches" ? "batches" : "trending";
+function rankingLabel(mode: RankingMode) {
+  if (mode === "ABS") return "Absolute growth";
+  if (mode === "RATE") return "Growth per day";
+  if (mode === "PCT") return "Percent growth";
+  if (mode === "TOTAL") return "Total count";
+  if (mode === "ENGAGEMENT") return "Engagement ratio";
+  return "Acceleration";
 }
 
-function applyTilt(e: React.MouseEvent<HTMLElement>) {
-  const card = e.currentTarget;
-  const rect = card.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  const centerX = rect.width / 2;
-  const centerY = rect.height / 2;
-  const rotateX = ((y - centerY) / centerY) * -6;
-  const rotateY = ((x - centerX) / centerX) * 6;
-  card.style.setProperty("--tilt-x", `${rotateX.toFixed(2)}deg`);
-  card.style.setProperty("--tilt-y", `${rotateY.toFixed(2)}deg`);
-  card.style.setProperty("--glow-x", `${(x / rect.width) * 100}%`);
-  card.style.setProperty("--glow-y", `${(y / rect.height) * 100}%`);
-  card.setAttribute("data-tilt", "true");
+function rankingDescription(mode: RankingMode) {
+  if (mode === "ABS") {
+    return "Ranked by raw snapshot growth over the baseline window.";
+  }
+  if (mode === "RATE") {
+    return "Ranked by normalized daily growth using the nearest available one-week baseline.";
+  }
+  if (mode === "PCT") {
+    return "Ranked by relative percentage change versus the baseline snapshot.";
+  }
+  if (mode === "TOTAL") {
+    return "Ranked by latest total metric value.";
+  }
+  if (mode === "ENGAGEMENT") {
+    return "Ranked by ratio between the selected metric and views.";
+  }
+  return "Ranked by acceleration: recent growth/day minus previous growth/day.";
 }
 
-function resetTilt(e: React.MouseEvent<HTMLElement>) {
-  const card = e.currentTarget;
-  card.style.setProperty("--tilt-x", "0deg");
-  card.style.setProperty("--tilt-y", "0deg");
-  card.removeAttribute("data-tilt");
+function formatRankingValue(item: TrendingManhwa, panel: TrendingPanel) {
+  const score = item.rankingScore;
+  if (score == null || !Number.isFinite(score)) {
+    return "-";
+  }
+  if (panel.rankingMode === "PCT" || panel.rankingMode === "ENGAGEMENT") {
+    return `${(score * 100).toFixed(1)}%`;
+  }
+  if (panel.rankingMode === "TOTAL") {
+    return formatter.format(score);
+  }
+  const prefix = score > 0 ? "+" : "";
+  if (panel.rankingMode === "RATE") {
+    return `${prefix}${formatter.format(score)}/day`;
+  }
+  if (panel.rankingMode === "ACCELERATION") {
+    return `${prefix}${formatter.format(score)}/day²`;
+  }
+  return `${prefix}${formatter.format(score)}`;
 }
 
 function isJobRunning(job: BatchJob) {
@@ -121,25 +231,72 @@ function progressWidth(job: BatchJob) {
   return `${Math.max(0, Math.min(100, job.progressPercent))}%`;
 }
 
+function applyTilt(e: MouseEvent<HTMLElement>) {
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const rotateX = ((y - centerY) / centerY) * -6;
+  const rotateY = ((x - centerX) / centerX) * 6;
+  card.style.setProperty("--tilt-x", `${rotateX.toFixed(2)}deg`);
+  card.style.setProperty("--tilt-y", `${rotateY.toFixed(2)}deg`);
+  card.style.setProperty("--glow-x", `${(x / rect.width) * 100}%`);
+  card.style.setProperty("--glow-y", `${(y / rect.height) * 100}%`);
+  card.setAttribute("data-tilt", "true");
+}
+
+function resetTilt(e: MouseEvent<HTMLElement>) {
+  const card = e.currentTarget;
+  card.style.setProperty("--tilt-x", "0deg");
+  card.style.setProperty("--tilt-y", "0deg");
+  card.removeAttribute("data-tilt");
+}
+
+function canAnimate() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return true;
+  }
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finePointer = window.matchMedia("(pointer: fine)").matches;
+  return !reducedMotion && finePointer;
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>(() => pageFromPath(window.location.pathname));
 
-  const [activePanelId, setActivePanelId] = useState<TrendingPanel["id"]>("asura");
+  const [activePanelId, setActivePanelId] = useState<TrendingPanel["id"]>("velocity");
+  const [activeSourceId, setActiveSourceId] = useState<number>(1);
   const [items, setItems] = useState<TrendingManhwa[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrySeed, setRetrySeed] = useState(0);
+  const [lastTrendingSync, setLastTrendingSync] = useState<string | null>(null);
 
   const [jobs, setJobs] = useState<BatchJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [startingJob, setStartingJob] = useState<string | null>(null);
   const [stoppingJob, setStoppingJob] = useState<string | null>(null);
+  const [lastJobsSync, setLastJobsSync] = useState<string | null>(null);
+
+  const [motionEnabled, setMotionEnabled] = useState(canAnimate());
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setMotionEnabled(canAnimate());
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
   }, []);
 
   useEffect(() => {
@@ -149,15 +306,23 @@ export default function App() {
 
     let cancelled = false;
 
-    async function loadJobs() {
+    async function loadJobs(isSilent: boolean) {
+      const controller = new AbortController();
       try {
-        const data = await fetchBatchJobs();
+        if (!isSilent) {
+          setJobsLoading(true);
+        }
+        const data = await fetchBatchJobs(controller.signal);
         if (!cancelled) {
           setJobs(data);
           setJobsError(null);
           setJobsLoading(false);
+          setLastJobsSync(new Date().toISOString());
         }
       } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
         if (!cancelled) {
           setJobsError((err as Error).message);
           setJobsLoading(false);
@@ -165,48 +330,90 @@ export default function App() {
       }
     }
 
-    setJobsLoading(true);
-    loadJobs();
-    const intervalId = window.setInterval(loadJobs, 2000);
+    void loadJobs(false);
+    const intervalId = window.setInterval(() => {
+      void loadJobs(true);
+    }, 3000);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [page]);
+  }, [page, retrySeed]);
+
+  const visiblePanels = useMemo(
+    () => trendingPanels.filter((panel) => isPanelSupportedBySource(panel.id, activeSourceId)),
+    [activeSourceId]
+  );
 
   useEffect(() => {
-    if (page !== "trending") {
+    if (visiblePanels.length === 0) {
+      return;
+    }
+    if (!visiblePanels.some((panel) => panel.id === activePanelId)) {
+      setActivePanelId(visiblePanels[0].id);
+    }
+  }, [activePanelId, visiblePanels]);
+
+  useEffect(() => {
+    if (page !== "trending" || visiblePanels.length === 0) {
       return;
     }
 
-    const activePanel = trendingPanels.find((option) => option.id === activePanelId) ?? trendingPanels[0];
+    const activePanel = visiblePanels.find((option) => option.id === activePanelId) ?? visiblePanels[0];
+    const metric = resolveMetricForPanel(activePanel, activeSourceId);
+    const minPreviousValue = resolveMinPreviousForPanel(activePanel, activeSourceId);
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    fetchTrending(activePanel.value, 10, activePanel.sourceId, activePanel.rankingMode)
-      .then((data) => {
+    async function loadTrending(isSilent: boolean) {
+      const controller = new AbortController();
+      try {
+        if (!isSilent) {
+          setLoading(true);
+        }
+        setError(null);
+        const data = await fetchTrending(
+          metric,
+          10,
+          activeSourceId,
+          activePanel.rankingMode,
+          minPreviousValue,
+          controller.signal
+        );
         if (!cancelled) {
           setItems(data);
           setLoading(false);
+          setLastTrendingSync(new Date().toISOString());
         }
-      })
-      .catch((err: Error) => {
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
         if (!cancelled) {
-          setError(err.message);
+          setError((err as Error).message);
           setLoading(false);
         }
-      });
+      }
+    }
+
+    void loadTrending(false);
+    const intervalId = window.setInterval(() => {
+      void loadTrending(true);
+    }, 60000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
-  }, [activePanelId, retrySeed, page]);
+  }, [activePanelId, activeSourceId, retrySeed, page, visiblePanels]);
 
   const activePanel = useMemo(
-    () => trendingPanels.find((option) => option.id === activePanelId) ?? trendingPanels[0],
-    [activePanelId]
+    () => visiblePanels.find((option) => option.id === activePanelId) ?? visiblePanels[0] ?? trendingPanels[0],
+    [activePanelId, visiblePanels]
+  );
+  const activeSource = useMemo(
+    () => sourcePanels.find((option) => option.id === activeSourceId) ?? sourcePanels[0],
+    [activeSourceId]
   );
 
   const orderedJobs = useMemo(() => {
@@ -241,6 +448,7 @@ export default function App() {
       await startBatchJob(jobName);
       setJobs(await fetchBatchJobs());
       setJobsError(null);
+      setLastJobsSync(new Date().toISOString());
     } catch (err) {
       setJobsError((err as Error).message);
     } finally {
@@ -254,6 +462,7 @@ export default function App() {
       await stopBatchJob(jobName);
       setJobs(await fetchBatchJobs());
       setJobsError(null);
+      setLastJobsSync(new Date().toISOString());
     } catch (err) {
       setJobsError((err as Error).message);
     } finally {
@@ -261,24 +470,41 @@ export default function App() {
     }
   }
 
+  function onCardMove(e: MouseEvent<HTMLElement>) {
+    if (!motionEnabled) {
+      return;
+    }
+    applyTilt(e);
+  }
+
+  function onCardLeave(e: MouseEvent<HTMLElement>) {
+    if (!motionEnabled) {
+      return;
+    }
+    resetTilt(e);
+  }
+
   return (
     <div className="app">
       <header className="hero">
         <div className="hero-tag">Manhwa Trend Tracker</div>
-        <div className="top-nav">
-          <button
-            className={`top-nav-link ${page === "batches" ? "is-active" : ""}`}
-            onClick={() => navigate("batches")}
-          >
-            Batch Runner
-          </button>
+
+        <nav className="top-nav" aria-label="Pages">
           <button
             className={`top-nav-link ${page === "trending" ? "is-active" : ""}`}
             onClick={() => navigate("trending")}
+            aria-current={page === "trending" ? "page" : undefined}
           >
             Trending
           </button>
-        </div>
+          <button
+            className={`top-nav-link ${page === "batches" ? "is-active" : ""}`}
+            onClick={() => navigate("batches")}
+            aria-current={page === "batches" ? "page" : undefined}
+          >
+            Batch Runner
+          </button>
+        </nav>
 
         {page === "batches" ? (
           <>
@@ -290,14 +516,30 @@ export default function App() {
           </>
         ) : (
           <>
-            <h1>{activePanel.headline}</h1>
+            <h1>{activeSource.label}: {activePanel.headline}</h1>
             <p>{activePanel.description}</p>
-            <div className="hero-controls">
-              {trendingPanels.map((option) => (
+            <div className="hero-controls" role="tablist" aria-label="Source panels">
+              {sourcePanels.map((option) => (
+                <button
+                  key={option.id}
+                  className={`metric-pill ${option.id === activeSourceId ? "is-active" : ""}`}
+                  onClick={() => setActiveSourceId(option.id)}
+                  role="tab"
+                  aria-selected={option.id === activeSourceId}
+                >
+                  <span>{option.label}</span>
+                  <small>Source scope</small>
+                </button>
+              ))}
+            </div>
+            <div className="hero-controls" role="tablist" aria-label="Trending panels">
+              {visiblePanels.map((option) => (
                 <button
                   key={option.id}
                   className={`metric-pill ${option.id === activePanelId ? "is-active" : ""}`}
                   onClick={() => setActivePanelId(option.id)}
+                  role="tab"
+                  aria-selected={option.id === activePanelId}
                 >
                   <span>{option.label}</span>
                   <small>{option.caption}</small>
@@ -309,13 +551,18 @@ export default function App() {
       </header>
 
       {page === "batches" ? (
-        <main className="jobs-panel">
+        <main className="jobs-panel" aria-live="polite">
           <div className="panel-header">
             <div>
               <h2>Scraper Control</h2>
               <p>Start jobs manually and monitor execution in real time.</p>
             </div>
-            <div className="panel-meta">{jobsLoading ? "Refreshing…" : `${orderedJobs.length} jobs`}</div>
+            <div className="panel-actions">
+              <button className="ghost-button" onClick={() => setRetrySeed((value) => value + 1)}>
+                Refresh now
+              </button>
+              <div className="panel-meta">{jobsLoading ? "Refreshing..." : `Last sync ${formatDate(lastJobsSync)}`}</div>
+            </div>
           </div>
 
           {jobsError ? <p className="jobs-error">{jobsError}</p> : null}
@@ -347,7 +594,7 @@ export default function App() {
 
                   <p className="job-meta">
                     Last update: {formatDate(job.lastUpdatedAt)}
-                    {job.executionId != null ? ` · Execution #${job.executionId}` : ""}
+                    {job.executionId != null ? ` | Execution #${job.executionId}` : ""}
                   </p>
 
                   <div className="job-actions">
@@ -356,7 +603,7 @@ export default function App() {
                       onClick={() => onStartJob(job.jobName)}
                       disabled={jobsLoading || startingJob === job.jobName || stoppingJob === job.jobName || running}
                     >
-                      {startingJob === job.jobName ? "Starting…" : running ? "Running" : "Run job"}
+                      {startingJob === job.jobName ? "Starting..." : running ? "Running" : "Run job"}
                     </button>
                     <button
                       className="job-stop"
@@ -368,7 +615,7 @@ export default function App() {
                         !canStopJob(job)
                       }
                     >
-                      {stoppingJob === job.jobName || stopping ? "Stopping…" : "Stop job"}
+                      {stoppingJob === job.jobName || stopping ? "Stopping..." : "Stop job"}
                     </button>
                   </div>
                 </article>
@@ -377,19 +624,23 @@ export default function App() {
           </div>
         </main>
       ) : (
-        <main className="panel">
+        <main className="panel" aria-live="polite">
           <div className="panel-header">
             <div>
               <h2>{activePanel.label} Ranking</h2>
               <p>
-                Fuel your next binge with the biggest momentum spikes. Ranking is rate-based and
-                uses the nearest available window to 7 days.
+                {rankingDescription(activePanel.rankingMode)}
                 {averageBaselineDays != null
                   ? ` Current board average: ${averageBaselineDays.toFixed(1)} days between snapshots.`
                   : " Current board average: waiting for enough snapshots."}
               </p>
             </div>
-            <div className="panel-meta">{loading ? "Refreshing…" : `${items.length} series`}</div>
+            <div className="panel-actions">
+              <button className="ghost-button" onClick={() => setRetrySeed((value) => value + 1)}>
+                Refresh now
+              </button>
+              <div className="panel-meta">{loading ? "Refreshing..." : `Last sync ${formatDate(lastTrendingSync)}`}</div>
+            </div>
           </div>
 
           {error ? (
@@ -403,7 +654,7 @@ export default function App() {
           ) : loading ? (
             <div className="loader">
               <div className="pulse" />
-              <p>Loading trending data…</p>
+              <p>Loading trending data...</p>
             </div>
           ) : items.length === 0 ? (
             <div className="empty-state">
@@ -413,6 +664,7 @@ export default function App() {
           ) : (
             <div className="trend-list">
               {items.map((item, index) => {
+                const primaryText = formatRankingValue(item, activePanel);
                 const cardContent = (
                   <>
                     <div className="cover">
@@ -428,14 +680,20 @@ export default function App() {
                     <div className="trend-main">
                       <h3>{item.title}</h3>
                       <p>
-                        Latest: {formatter.format(item.latestValue)} · Baseline: {formatter.format(item.previousValue)}
+                        Latest: {formatter.format(item.latestValue)}
+                        {item.previousValue != null ? ` | Baseline: ${formatter.format(item.previousValue)}` : ""}
                       </p>
                     </div>
                     <div className="trend-growth">
-                      <span className="label">Growth</span>
-                      <span className="value">+{formatter.format(item.growth)}</span>
+                      <span className="label">{rankingLabel(activePanel.rankingMode)}</span>
+                      <span className="value">{primaryText}</span>
                       <span className="timestamp">
-                        {Number.isFinite(item.growthPerDay) ? `+${formatter.format(item.growthPerDay)}/day` : "-"}
+                        {activePanel.rankingMode === "ENGAGEMENT"
+                          ? `${formatter.format(item.latestValue)} / ${formatter.format(item.previousValue ?? 0)}`
+                          : Number.isFinite(item.growthPerDay)
+                            ? `+${formatter.format(item.growthPerDay)}/day`
+                            : "-"}
+                        {item.growthPercent != null ? ` | ${(item.growthPercent * 100).toFixed(1)}%` : ""}
                       </span>
                       <span className="timestamp">{formatDate(item.latestAt)}</span>
                     </div>
@@ -450,8 +708,8 @@ export default function App() {
                       href={item.readUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onMouseMove={applyTilt}
-                      onMouseLeave={resetTilt}
+                      onMouseMove={onCardMove}
+                      onMouseLeave={onCardLeave}
                     >
                       {cardContent}
                     </a>
@@ -459,12 +717,7 @@ export default function App() {
                 }
 
                 return (
-                  <article
-                    className="trend-card"
-                    key={item.manhwaId}
-                    onMouseMove={applyTilt}
-                    onMouseLeave={resetTilt}
-                  >
+                  <article className="trend-card" key={item.manhwaId} onMouseMove={onCardMove} onMouseLeave={onCardLeave}>
                     {cardContent}
                   </article>
                 );

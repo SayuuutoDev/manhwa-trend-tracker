@@ -17,21 +17,26 @@ export async function fetchTrending(
   metric: MetricType,
   limit = 10,
   sourceId?: number,
-  mode: RankingMode = "RATE"
+  mode: RankingMode = "RATE",
+  minPreviousValue?: number,
+  signal?: AbortSignal
 ): Promise<TrendingManhwa[]> {
   const params = new URLSearchParams({ metric, limit: String(limit), mode });
   if (sourceId !== undefined) {
     params.set("sourceId", String(sourceId));
   }
-  const response = await fetch(`/api/trending?${params.toString()}`);
+  if (minPreviousValue !== undefined) {
+    params.set("minPreviousValue", String(minPreviousValue));
+  }
+  const response = await fetch(`/api/trending?${params.toString()}`, { signal });
   if (!response.ok) {
     throw new Error(await parseApiError(response));
   }
   return response.json();
 }
 
-export async function fetchBatchJobs(): Promise<BatchJob[]> {
-  const response = await fetch("/api/batches");
+export async function fetchBatchJobs(signal?: AbortSignal): Promise<BatchJob[]> {
+  const response = await fetch("/api/batches", { signal });
   if (!response.ok) {
     throw new Error(await parseApiError(response));
   }

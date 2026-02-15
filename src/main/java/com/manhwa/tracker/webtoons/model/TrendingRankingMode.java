@@ -3,5 +3,8 @@ package com.manhwa.tracker.webtoons.model;
 public enum TrendingRankingMode {
     ABS,
     RATE,
-    PCT
+    PCT,
+    TOTAL,
+    ENGAGEMENT,
+    ACCELERATION
 }

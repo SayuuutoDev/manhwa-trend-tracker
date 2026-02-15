@@ -42,11 +42,16 @@ public class TapasSeriesProcessor implements ItemProcessor<TapasSeriesDTO, List<
     public List<MetricSnapshot> process(TapasSeriesDTO dto) {
         Long manhwaId = resolveManhwaId(dto.getTitle());
         if (manhwaId == null) {
-            if (dto.getTitle() != null) {
-                skippedTitles.add(dto.getTitle());
+            manhwaId = mangaUpdatesEnrichmentService.resolveOrCreateManhwaByTitle(dto.getTitle());
+            if (manhwaId == null) {
+                if (dto.getTitle() != null) {
+                    skippedTitles.add(dto.getTitle());
+                }
+                System.out.println("WARN: Tapas title could not be resolved or created, skipping: " + dto.getTitle());
+                return null;
             }
-            System.out.println("WARN: Tapas title not linked to existing manhwa, skipping: " + dto.getTitle());
-            return null;
+            System.out.println("INFO: Tapas title created/resolved via MangaUpdates: "
+                    + dto.getTitle() + " -> manhwaId=" + manhwaId);
         }
 
         upsertExternalId(manhwaId, dto.getSeriesId());

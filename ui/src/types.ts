@@ -1,5 +1,5 @@
 export type MetricType = "VIEWS" | "FOLLOWERS" | "SUBSCRIBERS" | "LIKES";
-export type RankingMode = "ABS" | "RATE" | "PCT";
+export type RankingMode = "ABS" | "RATE" | "PCT" | "TOTAL" | "ENGAGEMENT" | "ACCELERATION";
 
 export type TrendingManhwa = {
   manhwaId: number;
@@ -15,6 +15,7 @@ export type TrendingManhwa = {
   baselineDays: number;
   growthPerDay: number;
   growthPercent?: number | null;
+  rankingScore?: number | null;
   rankingMode: RankingMode;
 };
 

@@ -39,17 +39,31 @@ public class WebtoonsProcessor implements ItemProcessor<ManhwaDTO, MetricSnapsho
     public MetricSnapshot process(ManhwaDTO dto) throws Exception {
         Manhwa manhwa = resolveManhwa(dto.getTitle());
         if (manhwa == null) {
-            if (dto.getTitle() != null) {
-                skippedTitles.add(dto.getTitle());
+            Long resolvedId = mangaUpdatesEnrichmentService.resolveOrCreateManhwaByTitle(dto.getTitle());
+            if (resolvedId == null) {
+                if (dto.getTitle() != null) {
+                    skippedTitles.add(dto.getTitle());
+                }
+                System.out.println("WARN: Webtoons title could not be resolved or created, skipping: " + dto.getTitle());
+                return null;
             }
-            System.out.println("WARN: Webtoons title not linked to existing manhwa, skipping: " + dto.getTitle());
-            return null;
+            manhwa = manhwaRepository.findById(resolvedId).orElse(null);
+            if (manhwa == null) {
+                if (dto.getTitle() != null) {
+                    skippedTitles.add(dto.getTitle());
+                }
+                System.out.println("WARN: Webtoons resolved manhwa missing after create, skipping: " + dto.getTitle());
+                return null;
+            }
+            System.out.println("INFO: Webtoons title created/resolved via MangaUpdates: "
+                    + dto.getTitle() + " -> manhwaId=" + manhwa.getId());
         }
 
         // 2. Update metadata if it has changed or was previously null
         boolean needsUpdate = false;
 
         upsertExternalId(manhwa.getId(), dto.getSeriesUrl());
+        upsertWebtoonsAlias(manhwa.getId(), dto.getTitle());
         coverSelectionService.upsertCoverCandidate(manhwa.getId(), TitleSource.WEBTOONS, dto.getCoverImageUrl());
 
         if (manhwa.getGenre() == null || !manhwa.getGenre().equals(dto.getGenre())) {
@@ -80,13 +94,59 @@ public class WebtoonsProcessor implements ItemProcessor<ManhwaDTO, MetricSnapsho
             return;
         }
         String externalId = seriesUrl.trim();
+        Optional<ManhwaExternalId> existingForManhwa = manhwaExternalIdRepository
+                .findByManhwaIdAndSource(manhwaId, TitleSource.WEBTOONS);
+        if (existingForManhwa.isPresent()) {
+            ManhwaExternalId row = existingForManhwa.get();
+            boolean changed = false;
+            if (!externalId.equals(row.getExternalId())) {
+                row.setExternalId(externalId);
+                changed = true;
+            }
+            if (row.getUrl() == null || row.getUrl().isBlank() || !seriesUrl.equals(row.getUrl())) {
+                row.setUrl(seriesUrl);
+                changed = true;
+            }
+            if (changed) {
+                try {
+                    manhwaExternalIdRepository.save(row);
+                } catch (DataIntegrityViolationException ex) {
+                    System.out.println("WARN: Could not update Webtoons external ID for manhwaId=" + manhwaId
+                            + " externalId=" + externalId + " : " + ex.getMessage());
+                }
+            }
+            return;
+        }
         if (manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.WEBTOONS, externalId).isPresent()) {
             return;
         }
         try {
             manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.WEBTOONS, externalId, seriesUrl));
-        } catch (DataIntegrityViolationException ignored) {
+        } catch (DataIntegrityViolationException ex) {
+            System.out.println("WARN: Could not insert Webtoons external ID for manhwaId=" + manhwaId
+                    + " externalId=" + externalId + " : " + ex.getMessage());
         }
+    }
+
+    private void upsertWebtoonsAlias(Long manhwaId, String title) {
+        if (manhwaId == null || title == null || title.isBlank()) {
+            return;
+        }
+        String normalized = TitleNormalizer.normalize(title);
+        if (normalized.isBlank()) {
+            return;
+        }
+        boolean exists = manhwaTitleRepository.existsByManhwaIdAndNormalizedTitleAndSourceAndLanguageIsNull(
+                manhwaId,
+                normalized,
+                TitleSource.WEBTOONS
+        );
+        if (exists) {
+            return;
+        }
+        ManhwaTitle alias = new ManhwaTitle(manhwaId, title, normalized, TitleSource.WEBTOONS);
+        alias.setCanonical(false);
+        manhwaTitleRepository.save(alias);
     }
 
     private Manhwa resolveManhwa(String title) {

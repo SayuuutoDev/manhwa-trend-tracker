@@ -77,14 +77,19 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
 
         Long manhwaId = resolveManhwaId(resolvedTitle);
         if (manhwaId == null) {
-            if (resolvedTitle != null) {
-                skippedTitles.add(resolvedTitle);
+            manhwaId = mangaUpdatesEnrichmentService.resolveOrCreateManhwaByTitle(resolvedTitle);
+            if (manhwaId == null) {
+                if (resolvedTitle != null) {
+                    skippedTitles.add(resolvedTitle);
+                }
+                System.out.println("WARN: Asura title could not be resolved or created, skipping: " + resolvedTitle);
+                return null;
             }
-            System.out.println("WARN: Asura title not linked to existing manhwa, skipping: " + resolvedTitle);
-            return null;
+            System.out.println("INFO: Asura title created/resolved via MangaUpdates: " + resolvedTitle + " -> manhwaId=" + manhwaId);
         }
 
         upsertExternalId(manhwaId, dto.getSeriesUrl());
+        upsertAsuraAlias(manhwaId, resolvedTitle);
         updateManhwaMetadata(manhwaId, doc);
         mangaUpdatesEnrichmentService.enrichManhwa(manhwaId, resolvedTitle);
 
@@ -103,12 +108,44 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
             return;
         }
         String externalId = seriesUrl.trim();
-        if (manhwaExternalIdRepository.findBySourceAndExternalId(TitleSource.ASURA, externalId).isPresent()) {
+        ManhwaExternalId existingForManhwa = manhwaExternalIdRepository
+                .findByManhwaIdAndSource(manhwaId, TitleSource.ASURA)
+                .orElse(null);
+        if (existingForManhwa != null) {
+            boolean changed = false;
+            if (!externalId.equals(existingForManhwa.getExternalId())) {
+                existingForManhwa.setExternalId(externalId);
+                changed = true;
+            }
+            if (existingForManhwa.getUrl() == null || existingForManhwa.getUrl().isBlank() || !seriesUrl.equals(existingForManhwa.getUrl())) {
+                existingForManhwa.setUrl(seriesUrl);
+                changed = true;
+            }
+            if (changed) {
+                try {
+                    manhwaExternalIdRepository.save(existingForManhwa);
+                } catch (DataIntegrityViolationException ex) {
+                    System.out.println("WARN: Could not update Asura external ID for manhwaId=" + manhwaId
+                            + " externalId=" + externalId + " : " + ex.getMessage());
+                }
+            }
+            return;
+        }
+        ManhwaExternalId existingByExternalId = manhwaExternalIdRepository
+                .findBySourceAndExternalId(TitleSource.ASURA, externalId)
+                .orElse(null);
+        if (existingByExternalId != null) {
+            if (existingByExternalId.getManhwaId() != null && !existingByExternalId.getManhwaId().equals(manhwaId)) {
+                System.out.println("WARN: Asura external ID already linked to different manhwaId="
+                        + existingByExternalId.getManhwaId() + " for url=" + seriesUrl);
+            }
             return;
         }
         try {
             manhwaExternalIdRepository.save(new ManhwaExternalId(manhwaId, TitleSource.ASURA, externalId, seriesUrl));
-        } catch (DataIntegrityViolationException ignored) {
+        } catch (DataIntegrityViolationException ex) {
+            System.out.println("WARN: Could not insert Asura external ID for manhwaId=" + manhwaId
+                    + " externalId=" + externalId + " : " + ex.getMessage());
         }
     }
 
@@ -125,6 +162,27 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
         }
         Manhwa manhwa = manhwaRepository.findByCanonicalTitle(title).orElse(null);
         return manhwa == null ? null : manhwa.getId();
+    }
+
+    private void upsertAsuraAlias(Long manhwaId, String title) {
+        if (manhwaId == null || title == null || title.isBlank()) {
+            return;
+        }
+        String normalized = TitleNormalizer.normalize(title);
+        if (normalized.isBlank()) {
+            return;
+        }
+        boolean exists = manhwaTitleRepository.existsByManhwaIdAndNormalizedTitleAndSourceAndLanguageIsNull(
+                manhwaId,
+                normalized,
+                TitleSource.ASURA
+        );
+        if (exists) {
+            return;
+        }
+        ManhwaTitle alias = new ManhwaTitle(manhwaId, title, normalized, TitleSource.ASURA);
+        alias.setCanonical(false);
+        manhwaTitleRepository.save(alias);
     }
 
     @PreDestroy
@@ -236,16 +294,15 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
     }
 
     private String extractDescription(Document doc) {
-        String ogDescription = doc.select("meta[property=og:description]").attr("content").trim();
+        String ogDescription = sanitizeDescription(doc.select("meta[property=og:description]").attr("content"));
         if (!ogDescription.isEmpty()) {
             return ogDescription;
         }
-        String metaDescription = doc.select("meta[name=description]").attr("content").trim();
+        String metaDescription = sanitizeDescription(doc.select("meta[name=description]").attr("content"));
         if (!metaDescription.isEmpty()) {
             return metaDescription;
         }
-        String summary = doc.select(".series-summary, .description, .series-desc, .summary")
-                .text().trim();
+        String summary = sanitizeDescription(doc.select(".series-summary, .description, .series-desc, .summary").text());
         if (!summary.isEmpty()) {
             return summary;
         }
@@ -276,5 +333,28 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
             return "";
         }
         return String.join(", ", genres);
+    }
+
+    private String sanitizeDescription(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String cleaned = raw
+                .replaceAll("(?i)\\[object\\s*object\\]", " ")
+                .replace("\r", " ")
+                .replaceAll("\\s+\\n", "\n")
+                .replaceAll("\\n\\s+", "\n")
+                .replaceAll("[ \\t]+", " ")
+                .replaceAll("(,\\s*){2,}", ", ")
+                .replaceAll("^[\\s\\uFEFF\\u200B]*[,;:]+\\s*", "")
+                .trim();
+        if (cleaned.isBlank()) {
+            return "";
+        }
+        long letterOrDigitCount = cleaned.chars().filter(Character::isLetterOrDigit).count();
+        if (letterOrDigitCount < 20) {
+            return "";
+        }
+        return cleaned;
     }
 }
