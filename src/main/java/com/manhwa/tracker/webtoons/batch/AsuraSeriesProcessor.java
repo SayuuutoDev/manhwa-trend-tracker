@@ -38,6 +38,8 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
             Pattern.compile("Followed\\s+by\\s*([0-9,]+)\\s*people", Pattern.CASE_INSENSITIVE);
     private static final Pattern BOOKMARKS_PATTERN =
             Pattern.compile("\\\\\"bookmarks_count\\\\\":([0-9]+)");
+    private static final Pattern RATING_COUNT_PATTERN =
+            Pattern.compile("\"ratingCount\"\\s*:\\s*\"?([0-9,]+)\"?", Pattern.CASE_INSENSITIVE);
 
     private final ManhwaRepository manhwaRepository;
     private final ManhwaTitleRepository manhwaTitleRepository;
@@ -161,13 +163,22 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
                 return 0L;
             }
         }
+        Matcher ratingCount = RATING_COUNT_PATTERN.matcher(doc.html());
+        if (ratingCount.find()) {
+            String raw = ratingCount.group(1).replace(",", "");
+            try {
+                return Long.parseLong(raw);
+            } catch (NumberFormatException ignored) {
+                return 0L;
+            }
+        }
         return 0L;
     }
 
     private String extractTitle(Document doc) {
         String ogTitle = doc.select("meta[property=og:title]").attr("content").trim();
         if (!ogTitle.isEmpty()) {
-            return ogTitle.replace(" - Asura Scans", "").trim();
+            return ogTitle.replace(" - Asura Scans", "").replace(" | Asura Scans", "").trim();
         }
         String h1 = doc.select("h1").text().trim();
         if (!h1.isEmpty()) {
@@ -175,7 +186,7 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
         }
         String titleTag = doc.select("title").text().trim();
         if (!titleTag.isEmpty()) {
-            return titleTag.replace(" - Asura Scans", "").trim();
+            return titleTag.replace(" - Asura Scans", "").replace(" | Asura Scans", "").trim();
         }
         return "";
     }
@@ -243,6 +254,12 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
 
     private String extractGenres(Document doc) {
         Set<String> genres = new LinkedHashSet<>();
+        for (Element el : doc.select("a[href*=/browse?genres=]")) {
+            String text = el.text().trim();
+            if (!text.isEmpty()) {
+                genres.add(text);
+            }
+        }
         for (Element el : doc.select(".genres a, .series-genres a, .tags a, a.genre, .info .genre a")) {
             String text = el.text().trim();
             if (!text.isEmpty()) {

@@ -34,4 +34,9 @@ public class BatchControlController {
     public BatchStartResponse startJob(@PathVariable String jobName) throws Exception {
         return batchControlService.startJob(jobName);
     }
+
+    @PostMapping("/{jobName}/stop")
+    public BatchStartResponse stopJob(@PathVariable String jobName) throws Exception {
+        return batchControlService.stopJob(jobName);
+    }
 }

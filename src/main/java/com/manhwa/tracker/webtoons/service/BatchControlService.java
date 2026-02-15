@@ -10,7 +10,10 @@ import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.batch.core.launch.JobExecutionNotRunningException;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.launch.JobOperator;
+import org.springframework.batch.core.launch.NoSuchJobExecutionException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -31,13 +34,16 @@ public class BatchControlService {
 
     private final JobLauncher jobLauncher;
     private final JobExplorer jobExplorer;
+    private final JobOperator jobOperator;
     private final Map<String, Job> jobsByBatchName;
 
     public BatchControlService(JobLauncher jobLauncher,
                                JobExplorer jobExplorer,
+                               JobOperator jobOperator,
                                Map<String, Job> jobsByName) {
         this.jobLauncher = jobLauncher;
         this.jobExplorer = jobExplorer;
+        this.jobOperator = jobOperator;
         this.jobsByBatchName = new HashMap<>();
         for (Job job : jobsByName.values()) {
             jobsByBatchName.put(job.getName(), job);
@@ -74,6 +80,41 @@ public class BatchControlService {
 
         JobExecution execution = jobLauncher.run(job, params);
         return new BatchStartResponse(jobName, execution.getId(), "Started");
+    }
+
+    public BatchStartResponse stopJob(String jobName) throws Exception {
+        assertKnownJob(jobName);
+
+        Set<JobExecution> running = jobExplorer.findRunningJobExecutions(jobName);
+        if (running.isEmpty()) {
+            throw new IllegalStateException("Job is not running: " + jobName);
+        }
+
+        JobExecution target = running.stream()
+                .max(Comparator.comparingLong(JobExecution::getId))
+                .orElseThrow(() -> new IllegalStateException("Job is not running: " + jobName));
+        if (target.getStatus() == BatchStatus.STOPPING) {
+            return new BatchStartResponse(jobName, target.getId(), "Stop already requested");
+        }
+
+        if (target.getStatus() != BatchStatus.STARTED && target.getStatus() != BatchStatus.STARTING) {
+            throw new IllegalStateException(
+                    "Job cannot be stopped in status " + target.getStatus() + " (executionId=" + target.getId() + ")"
+            );
+        }
+        final boolean accepted;
+        try {
+            accepted = jobOperator.stop(target.getId());
+        } catch (JobExecutionNotRunningException ex) {
+            throw new IllegalStateException("Job is not running (executionId=" + target.getId() + ")");
+        } catch (NoSuchJobExecutionException ex) {
+            throw new IllegalStateException("Unknown job execution (executionId=" + target.getId() + ")");
+        }
+        if (!accepted) {
+            throw new IllegalStateException("Stop request was not accepted (executionId=" + target.getId() + ")");
+        }
+
+        return new BatchStartResponse(jobName, target.getId(), "Stop requested");
     }
 
     private BatchJobView toView(String jobName) {

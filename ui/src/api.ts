@@ -47,3 +47,13 @@ export async function startBatchJob(jobName: string): Promise<BatchStartResponse
   }
   return response.json();
 }
+
+export async function stopBatchJob(jobName: string): Promise<BatchStartResponse> {
+  const response = await fetch(`/api/batches/${encodeURIComponent(jobName)}/stop`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+  return response.json();
+}

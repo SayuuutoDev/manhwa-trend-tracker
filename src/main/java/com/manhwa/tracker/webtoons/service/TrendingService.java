@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.regex.Pattern;
 
 @Service
 public class TrendingService {
@@ -76,11 +75,20 @@ public class TrendingService {
     private String toFlexibleGenrePattern(String genre) {
         String[] parts = genre.trim().split("[\\s-]+");
         if (parts.length == 0) {
-            return Pattern.quote(genre.trim());
+            return sanitizeGenreToken(genre.trim());
         }
         return Arrays.stream(parts)
-                .map(Pattern::quote)
+                .map(this::sanitizeGenreToken)
+                .filter(token -> !token.isBlank())
                 .reduce((left, right) -> left + "[[:space:]-]*" + right)
-                .orElse(Pattern.quote(genre.trim()));
+                .orElse(sanitizeGenreToken(genre.trim()));
+    }
+
+    private String sanitizeGenreToken(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        // Keep alnum tokens only; this avoids DB regex escape incompatibilities (e.g. \Q...\E).
+        return value.toLowerCase().replaceAll("[^a-z0-9]+", "");
     }
 }

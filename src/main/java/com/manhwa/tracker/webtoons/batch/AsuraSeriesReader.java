@@ -39,6 +39,9 @@ public class AsuraSeriesReader implements ItemReader<AsuraSeriesDTO> {
     @Value("${app.asura.page-delay-ms:300}")
     private long pageDelayMs;
 
+    @Value("${app.asura.stale-page-limit:2}")
+    private int stalePageLimit;
+
     @BeforeStep
     public void beforeStep(StepExecution stepExecution) {
         data.clear();
@@ -49,31 +52,38 @@ public class AsuraSeriesReader implements ItemReader<AsuraSeriesDTO> {
     public AsuraSeriesDTO read() throws Exception {
         if (data.isEmpty()) {
             Map<String, String> series = new LinkedHashMap<>();
+            int stalePages = 0;
 
             for (int page = 1; page <= maxPages; page++) {
                 String url = baseUrl + seriesPath + page;
                 Document doc = Jsoup.connect(url)
                         .userAgent(userAgent)
                         .get();
+                int beforeCount = series.size();
 
-                Elements links = doc.select("a[href^=/series/][class*=overflow-hidden][class*=leading]");
+                // Main series cards on asuracomic.net use relative links like "series/<slug>".
+                Elements links = doc.select("a[href^=series/]");
+                if (links.isEmpty()) {
+                    // Fallback for legacy layouts that expose "/series/<slug>" links.
+                    links = doc.select("a[href^=/series/]");
+                }
                 for (Element link : links) {
-                    String href = link.attr("href").trim();
-                    if (href.isEmpty()) {
-                        continue;
-                    }
-                    String absUrl = href.startsWith("http") ? href : baseUrl + href;
+                    addSeriesLink(series, link.attr("href"), link.text());
+                }
 
-                    String title = link.text().trim();
-                    if (title.equalsIgnoreCase("READ ON OURNEW BETA SITE!")
-                            || title.equalsIgnoreCase("READ ON OUR NEW BETA SITE!")) {
-                        continue;
-                    }
-                    if (title.contains("...")) {
-                        title = "";
-                    }
+                int afterCount = series.size();
+                if (afterCount == beforeCount) {
+                    stalePages++;
+                } else {
+                    stalePages = 0;
+                }
 
-                    series.putIfAbsent(absUrl, title);
+                if (stalePageLimit > 0 && stalePages >= stalePageLimit) {
+                    if (debug) {
+                        System.out.println("DEBUG: Asura series pagination stale at page " + page
+                                + " (" + stalePages + " consecutive pages with no new series)");
+                    }
+                    break;
                 }
 
                 if (pageDelayMs > 0 && page < maxPages) {
@@ -98,5 +108,77 @@ public class AsuraSeriesReader implements ItemReader<AsuraSeriesDTO> {
             return data.get(index++);
         }
         return null;
+    }
+
+    private void addSeriesLink(Map<String, String> series, String href, String rawTitle) {
+        String normalizedHref = normalizeSeriesHref(href);
+        if (normalizedHref.isEmpty()) {
+            return;
+        }
+        String title = normalizeTitle(rawTitle);
+        String absUrl;
+        if (normalizedHref.startsWith("http")) {
+            absUrl = normalizedHref;
+        } else {
+            absUrl = baseUrl + normalizedHref;
+        }
+        series.putIfAbsent(absUrl, title);
+    }
+
+    private String normalizeSeriesHref(String href) {
+        if (href == null) {
+            return "";
+        }
+        String trimmed = href.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        String path = trimmed;
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            int schemeIndex = path.indexOf("://");
+            int firstPathSlash = schemeIndex >= 0 ? path.indexOf('/', schemeIndex + 3) : -1;
+            if (firstPathSlash < 0) {
+                return "";
+            }
+            path = path.substring(firstPathSlash);
+        }
+        if (path.startsWith("series/")) {
+            path = "/" + path;
+        }
+        int index = path.indexOf("/series/");
+        if (index < 0) {
+            return "";
+        }
+        path = path.substring(index);
+        int queryIndex = path.indexOf('?');
+        if (queryIndex >= 0) {
+            path = path.substring(0, queryIndex);
+        }
+        int hashIndex = path.indexOf('#');
+        if (hashIndex >= 0) {
+            path = path.substring(0, hashIndex);
+        }
+        if ("/series/".equals(path) || path.length() <= "/series/".length()) {
+            return "";
+        }
+        if (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
+    }
+
+    private String normalizeTitle(String rawTitle) {
+        if (rawTitle == null) {
+            return "";
+        }
+        String title = rawTitle.trim();
+        if (title.equalsIgnoreCase("READ ON OURNEW BETA SITE!")
+                || title.equalsIgnoreCase("READ ON OUR NEW BETA SITE!")) {
+            return "";
+        }
+        if (title.contains("...")) {
+            return "";
+        }
+        return title;
     }
 }

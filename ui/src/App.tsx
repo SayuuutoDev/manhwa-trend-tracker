@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchBatchJobs, fetchTrending, startBatchJob } from "./api";
+import { fetchBatchJobs, fetchTrending, startBatchJob, stopBatchJob } from "./api";
 import { BatchJob, MetricType, RankingMode, TrendingManhwa } from "./types";
 import defaultCover from "./assets/default-cover.svg";
 
@@ -100,6 +100,14 @@ function isJobRunning(job: BatchJob) {
   return job.running || job.status === "STARTED" || job.status === "STARTING";
 }
 
+function isJobStopping(job: BatchJob) {
+  return job.status === "STOPPING";
+}
+
+function canStopJob(job: BatchJob) {
+  return isJobRunning(job) && !isJobStopping(job);
+}
+
 function progressClass(job: BatchJob) {
   if (isJobRunning(job)) return "progress-fill is-running";
   if (job.status === "COMPLETED") return "progress-fill is-completed";
@@ -126,6 +134,7 @@ export default function App() {
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [startingJob, setStartingJob] = useState<string | null>(null);
+  const [stoppingJob, setStoppingJob] = useState<string | null>(null);
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
@@ -239,6 +248,19 @@ export default function App() {
     }
   }
 
+  async function onStopJob(jobName: string) {
+    setStoppingJob(jobName);
+    try {
+      await stopBatchJob(jobName);
+      setJobs(await fetchBatchJobs());
+      setJobsError(null);
+    } catch (err) {
+      setJobsError((err as Error).message);
+    } finally {
+      setStoppingJob(null);
+    }
+  }
+
   return (
     <div className="app">
       <header className="hero">
@@ -301,6 +323,7 @@ export default function App() {
           <div className="job-grid">
             {orderedJobs.map((job) => {
               const running = isJobRunning(job);
+              const stopping = isJobStopping(job);
               return (
                 <article className="job-card" key={job.jobName}>
                   <div className="job-row">
@@ -327,13 +350,27 @@ export default function App() {
                     {job.executionId != null ? ` · Execution #${job.executionId}` : ""}
                   </p>
 
-                  <button
-                    className="job-run"
-                    onClick={() => onStartJob(job.jobName)}
-                    disabled={jobsLoading || startingJob === job.jobName || running}
-                  >
-                    {startingJob === job.jobName ? "Starting…" : running ? "Running" : "Run job"}
-                  </button>
+                  <div className="job-actions">
+                    <button
+                      className="job-run"
+                      onClick={() => onStartJob(job.jobName)}
+                      disabled={jobsLoading || startingJob === job.jobName || stoppingJob === job.jobName || running}
+                    >
+                      {startingJob === job.jobName ? "Starting…" : running ? "Running" : "Run job"}
+                    </button>
+                    <button
+                      className="job-stop"
+                      onClick={() => onStopJob(job.jobName)}
+                      disabled={
+                        jobsLoading ||
+                        stoppingJob === job.jobName ||
+                        startingJob === job.jobName ||
+                        !canStopJob(job)
+                      }
+                    >
+                      {stoppingJob === job.jobName || stopping ? "Stopping…" : "Stop job"}
+                    </button>
+                  </div>
                 </article>
               );
             })}

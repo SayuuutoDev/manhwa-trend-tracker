@@ -156,6 +156,7 @@ Recent changes (2026-02-13)
 
 Instruction
 - Always update `CONTEXT.md` after making changes (features, fixes, migrations, configs, or new files).
+- Hard rule: Never use `https://beta.asurascans.com/` as a scraping source for Asura jobs.
 
 Recent docs
 - Added `README.md` with run instructions for backend, scraping, frontend, and troubleshooting.
@@ -238,6 +239,12 @@ Recent docs
     - `TapasSeriesProcessor` now stores `https://tapas.io/series/{seriesId}` and backfills URL on existing Tapas external IDs.
   - Added migration `V5__backfill_external_id_urls.sql` to populate missing URLs for existing rows:
     - Tapas numeric IDs -> `https://tapas.io/series/{external_id}`
+- 2026-02-15: Asura reader hardened to target the correct list container and avoid early truncation:
+  - `AsuraSeriesReader` now prefers links under the `Series list` section (`h3`-anchored scope) instead of relying only on a generic selector that could bias toward fixed panels.
+  - Follow-up hardening: removed generic DOM fallback to avoid leaking `Popular` panel links when `Series list` links are not present in server-rendered HTML.
+  - Added URL extraction fallback from page payload (`/series/{slug}` pattern) to recover entries when link markup shifts.
+  - Added stale pagination stop (`app.asura.stale-page-limit`, default `2`) to stop scanning when pages stop yielding new series.
+  - Runtime verification after restart: `asuraScrapeJob` execution `56` completed with `read=15`, `write=13`, `filter=2` (previously `read=10`, `write=9`, `filter=1`).
     - Asura/Webtoons URL-shaped `external_id` copied into `url`.
 - 2026-02-14: Ranking exclusion rule added:
   - Trending query now excludes manhwas whose `genre` matches "slice of life" (case-insensitive, including `slice-of-life` variants).
@@ -264,6 +271,7 @@ Recent docs
     - `app.tapas.info-genre.enabled` (default `true`)
     - `app.tapas.info-request-delay-ms` (default `120`)
   - Values are normalized through existing tag cleanup (leading `#` removed) and merged deduped with API genres.
+  - Update: parser now also reads Tapas info-page hashtag chips (`a.tags__item`) so series like `Hugger Mugger` can merge tags (e.g. `#romance`, `#bl`, `#lgbt`) into `manhwas.genre`.
 - 2026-02-14: Webtoons scraper configuration parity added:
   - `WebtoonsReader` no longer hardcodes source URL/UA and now uses properties:
     - `app.webtoons.base-url`
@@ -279,6 +287,17 @@ Recent docs
     - `app.ranking.excluded-genres` (comma-separated list).
   - `TrendingService` converts this list into a case-insensitive regex and passes it to `MetricSnapshotRepository.findTrending`.
   - Matching is tolerant to spaces/hyphens for multi-word genres.
+- 2026-02-14: Batch Runner now supports stopping running jobs:
+  - Added backend endpoint: `POST /api/batches/{jobName}/stop`.
+  - `BatchControlService` now uses Spring Batch `JobOperator.stop(executionId)` for the latest running execution of the selected job.
+  - Batch Runner UI (`/batches`) now shows a `Stop job` button per card with in-flight state (`Stopping...`).
+  - Stop behavior hardened:
+    - Stop requests are now idempotent for `STOPPING` executions (`"Stop already requested"` instead of 500).
+    - UI disables stop action when a job is already `STOPPING` to avoid repeated failing stop attempts.
+- 2026-02-14: Trending API regex error fixed:
+  - `TrendingService` exclusion regex builder now emits Postgres-safe tokens (no Java `Pattern.quote` escapes), fixing `/api/trending` 500 errors caused by `invalid escape \\ sequence`.
+- 2026-02-14: Tapas info-page tag ingestion expanded:
+  - `TapasSeriesReader` now ingests `a.tags__item` hashtags from Tapas `/info` pages in addition to `Genres` chips and merges them into `TapasSeriesDTO.genre` (with `#` removed).
   - Tag values are normalized before merging into `genre` (leading `#` removed).
   - Implemented in `src/main/java/com/manhwa/tracker/webtoons/batch/TapasSeriesReader.java`.
 - 2026-02-14: Tapas ranking mode switched to absolute growth:

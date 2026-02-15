@@ -29,6 +29,7 @@ public class TapasSeriesReader implements ItemReader<TapasSeriesDTO> {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
+            .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
     private final List<TapasSeriesDTO> pageItems = new ArrayList<>();
@@ -207,6 +208,9 @@ public class TapasSeriesReader implements ItemReader<TapasSeriesDTO> {
                 for (Element chip : section.select("a")) {
                     addTag(values, chip.text());
                 }
+            }
+            for (Element tagChip : doc.select("a.tags__item")) {
+                addTag(values, tagChip.text());
             }
 
             String result = values.isEmpty() ? null : String.join(", ", values);
