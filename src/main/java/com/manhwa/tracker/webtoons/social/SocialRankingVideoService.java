@@ -39,12 +39,6 @@ public class SocialRankingVideoService {
     private static final int WIDTH = 1080;
     private static final int HEIGHT = 1920;
     private static final int FPS = 24;
-    private static final int DURATION_SECONDS = 15;
-    private static final int LIMIT = 5;
-    private static final int TOTAL_FRAMES = FPS * DURATION_SECONDS;
-    private static final int INTRO_FRAMES = FPS * 2;
-    private static final float RANK_TEASE_WINDOW = 0.16f;
-    private static final float TRANSITION_WINDOW = 0.22f;
     private static final DecimalFormat INTEGER_FORMAT = new DecimalFormat("#,###");
     private static final DecimalFormat DECIMAL_FORMAT = new DecimalFormat("#,###.0");
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US);
@@ -68,23 +62,25 @@ public class SocialRankingVideoService {
 
     public byte[] createVideo(SocialRankingVideoRequest request) throws IOException {
         SocialRankingVideoRequest normalized = normalize(request);
+        TimingSpec timing = resolveTiming(normalized.getPace());
+
         List<TrendingManhwaDTO> rows = trendingService.getTrending(
                 normalized.getMetric(),
                 normalized.getSourceId(),
-                LIMIT,
+                normalized.getLimit(),
                 normalized.getMode(),
                 null
         );
-        if (rows.size() > LIMIT) {
-            rows = rows.subList(0, LIMIT);
+        if (rows.size() > normalized.getLimit()) {
+            rows = rows.subList(0, normalized.getLimit());
         }
 
         Map<Long, BufferedImage> covers = preloadCovers(rows, normalized.getSourceId());
         Path tempVideo = Files.createTempFile("social-ranking-", ".mp4");
         try {
             AWTSequenceEncoder encoder = AWTSequenceEncoder.createSequenceEncoder(tempVideo.toFile(), FPS);
-            for (int frame = 0; frame < TOTAL_FRAMES; frame++) {
-                BufferedImage image = renderFrame(normalized, rows, covers, frame);
+            for (int frame = 0; frame < timing.totalFrames(); frame++) {
+                BufferedImage image = renderFrame(normalized, timing, rows, covers, frame);
                 encoder.encodeImage(image);
             }
             encoder.finish();
@@ -102,39 +98,54 @@ public class SocialRankingVideoService {
         normalized.setTitle(request.getTitle());
         normalized.setSubtitle(request.getSubtitle());
         normalized.setIncludeTimestamp(request.getIncludeTimestamp() == null ? Boolean.TRUE : request.getIncludeTimestamp());
+        normalized.setTheme(sanitizeTheme(request.getTheme()));
+        normalized.setFormat(sanitizeFormat(request.getFormat()));
+        normalized.setPace(sanitizePace(request.getPace()));
+
+        int limit = request.getSourceId() == null ? 5 : 4;
+        if ("x".equals(normalized.getFormat())) {
+            limit = 3;
+        }
+        if ("tiktok".equals(normalized.getFormat())) {
+            limit = 4;
+        }
+        int requestedLimit = request.getLimit() == null ? limit : request.getLimit();
+        normalized.setLimit(Math.max(3, Math.min(requestedLimit, 5)));
         return normalized;
     }
 
     private BufferedImage renderFrame(
             SocialRankingVideoRequest request,
+            TimingSpec timing,
             List<TrendingManhwaDTO> rows,
             Map<Long, BufferedImage> covers,
             int frame
     ) {
+        ThemeSpec theme = resolveTheme(request.getTheme());
         BufferedImage canvas = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = canvas.createGraphics();
         applyRenderingHints(g);
 
         if (rows.isEmpty()) {
-            drawBackground(g);
-            drawEmpty(g);
+            drawBackground(g, theme);
+            drawEmpty(g, theme);
             g.dispose();
             return canvas;
         }
 
-        if (frame < INTRO_FRAMES) {
-            drawIntroFrame(g, request, frame / (float) INTRO_FRAMES);
-            drawProgress(g, frame + 1, TOTAL_FRAMES);
-            drawFooter(g, request);
+        if (frame < timing.introFrames()) {
+            drawIntroFrame(g, request, theme, frame / (float) Math.max(1, timing.introFrames()));
+            drawProgress(g, theme, frame + 1, timing.totalFrames());
+            drawFooter(g, request, theme);
             g.dispose();
             return canvas;
         }
 
-        int mainFrames = TOTAL_FRAMES - INTRO_FRAMES;
+        int mainFrames = timing.totalFrames() - timing.introFrames();
         int sceneFrames = Math.max(1, mainFrames / rows.size());
-        int mainFrame = frame - INTRO_FRAMES;
+        int mainFrame = frame - timing.introFrames();
         int scene = Math.min(rows.size() - 1, mainFrame / sceneFrames);
-        int currentRowIndex = rows.size() - 1 - scene; // #5 -> #1
+        int currentRowIndex = rows.size() - 1 - scene;
         int sceneFrame = mainFrame - (scene * sceneFrames);
         float sceneProgress = Math.max(0f, Math.min(1f, sceneFrame / (float) sceneFrames));
 
@@ -145,44 +156,44 @@ public class SocialRankingVideoService {
         BufferedImage currentCover = covers.getOrDefault(currentRow.getManhwaId(), placeholderCover);
         BufferedImage previousCover = covers.getOrDefault(previousRow.getManhwaId(), placeholderCover);
 
-        if (sceneProgress < RANK_TEASE_WINDOW) {
-            drawBackground(g);
-            float tease = sceneProgress / RANK_TEASE_WINDOW;
-            drawRankTeaseOverlay(g, currentRowIndex + 1, request, tease);
+        if (sceneProgress < timing.teaseWindow()) {
+            drawBackground(g, theme);
+            float tease = sceneProgress / timing.teaseWindow();
+            drawRankTeaseOverlay(g, currentRowIndex + 1, request, theme, tease);
         } else {
-            float revealProgress = (sceneProgress - RANK_TEASE_WINDOW) / (1f - RANK_TEASE_WINDOW);
-            drawBackground(g);
-            if (scene > 0 && revealProgress < TRANSITION_WINDOW) {
-                float t = revealProgress / TRANSITION_WINDOW;
-                drawCoverLayer(g, previousCover, -130f * t, 1.02f + (0.02f * t), 1f - t);
-                drawCoverLayer(g, currentCover, 130f * (1f - t), 1.06f - (0.04f * t), t);
-                drawSceneOverlay(g, previousRow, previousRowIndex + 1, request, 1f - t);
-                drawSceneOverlay(g, currentRow, currentRowIndex + 1, request, t);
+            float revealProgress = (sceneProgress - timing.teaseWindow()) / (1f - timing.teaseWindow());
+            drawBackground(g, theme);
+            if (scene > 0 && revealProgress < timing.transitionWindow()) {
+                float t = revealProgress / timing.transitionWindow();
+                drawCoverLayer(g, previousCover, -120f * t, 1.03f + (0.02f * t), 1f - t);
+                drawCoverLayer(g, currentCover, 120f * (1f - t), 1.06f - (0.04f * t), t);
+                drawSceneOverlay(g, previousRow, previousRowIndex + 1, request, theme, 1f - t, false);
+                drawSceneOverlay(g, currentRow, currentRowIndex + 1, request, theme, t, currentRowIndex == 0);
             } else {
-                float zoom = 1.04f + (0.03f * (1f - revealProgress));
+                float zoom = 1.03f + (0.03f * (1f - revealProgress));
                 drawCoverLayer(g, currentCover, 0f, zoom, 1f);
                 float overlayAlpha = Math.min(1f, Math.max(0f, (revealProgress - 0.03f) / 0.18f));
-                drawSceneOverlay(g, currentRow, currentRowIndex + 1, request, overlayAlpha);
+                drawSceneOverlay(g, currentRow, currentRowIndex + 1, request, theme, overlayAlpha, currentRowIndex == 0);
             }
         }
 
-        drawProgress(g, frame + 1, TOTAL_FRAMES);
-        drawFooter(g, request);
+        drawProgress(g, theme, frame + 1, timing.totalFrames());
+        drawFooter(g, request, theme);
         g.dispose();
         return canvas;
     }
 
-    private void drawBackground(Graphics2D g) {
-        g.setPaint(new GradientPaint(0, 0, new Color(19, 24, 48), 0, HEIGHT, new Color(8, 10, 22)));
+    private void drawBackground(Graphics2D g, ThemeSpec theme) {
+        g.setPaint(new GradientPaint(0, 0, theme.backgroundTop(), 0, HEIGHT, theme.backgroundBottom()));
         g.fillRect(0, 0, WIDTH, HEIGHT);
-        g.setColor(new Color(66, 201, 255, 20));
-        g.fillOval(-150, -220, 700, 700);
-        g.setColor(new Color(255, 114, 66, 18));
-        g.fillOval(560, -200, 700, 700);
+        g.setColor(withAlpha(theme.accent(), 24));
+        g.fillOval(-160, -220, 760, 760);
+        g.setColor(withAlpha(theme.highlight(), 20));
+        g.fillOval(540, -180, 760, 760);
     }
 
-    private void drawIntroFrame(Graphics2D g, SocialRankingVideoRequest request, float progress) {
-        drawBackground(g);
+    private void drawIntroFrame(Graphics2D g, SocialRankingVideoRequest request, ThemeSpec theme, float progress) {
+        drawBackground(g, theme);
         float eased = (float) (1 - Math.pow(1 - progress, 3));
         int rise = Math.round((1f - eased) * 80f);
         float alpha = Math.max(0f, Math.min(1f, eased * 1.2f));
@@ -190,120 +201,130 @@ public class SocialRankingVideoService {
         AlphaComposite old = (AlphaComposite) g.getComposite();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
 
-        g.setColor(new Color(255, 255, 255, 24));
-        g.fill(new RoundRectangle2D.Double(60, 250 + rise, WIDTH - 120, 400, 40, 40));
+        g.setColor(withAlpha(theme.cardBackground(), 200));
+        g.fill(new RoundRectangle2D.Double(60, 250 + rise, WIDTH - 120, 380, 40, 40));
 
-        g.setColor(Color.WHITE);
-        g.setFont(new Font("SansSerif", Font.BOLD, 74));
-        String title = request.getTitle() == null ? "Top 5 Trending Manhwa" : request.getTitle();
-        g.drawString(title, 88, 395 + rise);
+        g.setColor(theme.primaryText());
+        g.setFont(new Font("SansSerif", Font.BOLD, 78));
+        String title = request.getTitle() == null || request.getTitle().isBlank() ? "Top Trending Manhwa" : request.getTitle();
+        g.drawString(title, 88, 392 + rise);
 
         g.setFont(new Font("SansSerif", Font.BOLD, 34));
-        g.setColor(new Color(200, 230, 255));
+        g.setColor(theme.secondaryText());
         String subtitle = request.getSubtitle() == null || request.getSubtitle().isBlank()
-                ? "15s countdown  •  #5 to #1 reveal"
+                ? "Fast ranking reveal starts now"
                 : request.getSubtitle();
-        g.drawString(subtitle, 92, 456 + rise);
+        g.drawString(subtitle, 92, 450 + rise);
 
         g.setFont(new Font("SansSerif", Font.PLAIN, 30));
-        g.setColor(new Color(238, 246, 255, 220));
-        g.drawString("Metric: " + request.getMetric().name() + "  •  Mode: " + request.getMode().name() + "  •  " + resolveSource(request.getSourceId()), 92, 516 + rise);
+        g.setColor(withAlpha(theme.primaryText(), 220));
+        g.drawString("Metric: " + request.getMetric().name() + " | " + resolveSource(request.getSourceId()), 92, 508 + rise);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 120));
-        g.setColor(new Color(255, 255, 255, 210));
-        g.drawString("READY?", 90, 760 + Math.round((1f - eased) * 34f));
+        g.setFont(new Font("SansSerif", Font.BOLD, 124));
+        g.setColor(withAlpha(theme.accent(), 235));
+        g.drawString("#" + request.getLimit(), 92, 770 + Math.round((1f - eased) * 26f));
 
         g.setComposite(old);
     }
 
-    private void drawRankTeaseOverlay(Graphics2D g, int rank, SocialRankingVideoRequest request, float progress) {
+    private void drawRankTeaseOverlay(Graphics2D g, int rank, SocialRankingVideoRequest request, ThemeSpec theme, float progress) {
         float eased = (float) (1 - Math.pow(1 - progress, 3));
+
         AlphaComposite old = (AlphaComposite) g.getComposite();
-        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.88f));
-        g.setPaint(new GradientPaint(0, 0, new Color(0, 0, 0, 145), 0, HEIGHT, new Color(0, 0, 0, 210)));
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.86f));
+        g.setPaint(new GradientPaint(0, 0, new Color(0, 0, 0, 130), 0, HEIGHT, new Color(0, 0, 0, 210)));
         g.fillRect(0, 0, WIDTH, HEIGHT);
         g.setComposite(old);
 
-        int pulseRise = Math.round((1f - eased) * 45f);
-        g.setColor(new Color(255, 255, 255, 210));
-        g.setFont(new Font("SansSerif", Font.BOLD, 50));
-        g.drawString("NEXT RANK", 78, 260 + pulseRise);
+        int rise = Math.round((1f - eased) * 36f);
+        g.setColor(theme.secondaryText());
+        g.setFont(new Font("SansSerif", Font.BOLD, 52));
+        g.drawString("NEXT RANK", 78, 272 + rise);
 
-        g.setColor(new Color(140, 241, 255));
+        g.setColor(theme.accent());
         g.setFont(new Font("SansSerif", Font.BOLD, 260));
-        g.drawString("#" + rank, 78, 520 + pulseRise);
+        g.drawString("#" + rank, 78, 526 + rise);
 
-        g.setColor(new Color(255, 255, 255, 220));
+        g.setColor(theme.primaryText());
         g.setFont(new Font("SansSerif", Font.BOLD, 44));
-        g.drawString("Who climbs this slot?", 78, 610 + pulseRise);
+        g.drawString("Who takes this spot?", 78, 614 + rise);
 
-        g.setColor(new Color(207, 227, 255, 230));
-        g.setFont(new Font("SansSerif", Font.PLAIN, 30));
-        String subtitle = request.getSubtitle() == null || request.getSubtitle().isBlank()
-                ? "Bottom to top reveal in progress..."
-                : request.getSubtitle();
-        g.drawString(subtitle, 78, 664 + pulseRise);
+        g.setColor(theme.secondaryText());
+        g.setFont(new Font("SansSerif", Font.PLAIN, 32));
+        g.drawString(resolveSource(request.getSourceId()), 78, 664 + rise);
     }
 
-    private void drawSceneOverlay(Graphics2D g, TrendingManhwaDTO row, int rank, SocialRankingVideoRequest request, float alpha) {
+    private void drawSceneOverlay(
+            Graphics2D g,
+            TrendingManhwaDTO row,
+            int rank,
+            SocialRankingVideoRequest request,
+            ThemeSpec theme,
+            float alpha,
+            boolean finalRank
+    ) {
         AlphaComposite old = (AlphaComposite) g.getComposite();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
 
-        g.setPaint(new GradientPaint(0, 0, new Color(0, 0, 0, 120), 0, HEIGHT, new Color(0, 0, 0, 210)));
+        g.setPaint(new GradientPaint(0, 0, new Color(0, 0, 0, 115), 0, HEIGHT, new Color(0, 0, 0, 215)));
         g.fillRect(0, 0, WIDTH, HEIGHT);
 
-        g.setColor(new Color(255, 255, 255, 38));
-        g.fill(new RoundRectangle2D.Double(48, 58, WIDTH - 96, 92, 22, 22));
-        g.setColor(Color.WHITE);
-        g.setFont(new Font("SansSerif", Font.BOLD, 34));
-        String headerTitle = request.getTitle() == null ? "Top 5 Trending Manhwa" : request.getTitle();
-        g.drawString(headerTitle, 78, 118);
+        int badgeY = 88;
+        g.setColor(theme.badgeColor());
+        g.fillRoundRect(72, badgeY, 170, 78, 22, 22);
+        g.setColor(theme.badgeTextColor());
+        g.setFont(new Font("SansSerif", Font.BOLD, 48));
+        g.drawString("#" + rank, 106, badgeY + 56);
 
-        g.setColor(new Color(255, 255, 255, 200));
-        g.setFont(new Font("SansSerif", Font.BOLD, 50));
-        g.drawString("#" + rank, 74, 290);
+        g.setColor(theme.primaryText());
+        g.setFont(new Font("SansSerif", Font.BOLD, 34));
+        String headerTitle = request.getTitle() == null || request.getTitle().isBlank() ? "Top Trending Manhwa" : request.getTitle();
+        g.drawString(headerTitle, 274, 140);
 
         int titleX = 74;
-        int titleY = 370;
+        int titleY = 360;
         int maxWidth = WIDTH - 148;
-        int maxLines = 9;
+        int maxLines = 8;
         Font titleFont = pickTitleFont(g, row.getTitle(), maxWidth, maxLines);
         g.setFont(titleFont);
-        g.setColor(Color.WHITE);
-        drawWrappedText(g, safeTitle(row.getTitle()), titleX, titleY, maxWidth, titleFont.getSize() + 12, maxLines);
+        g.setColor(theme.primaryText());
+        drawWrappedText(g, safeTitle(row.getTitle()), titleX, titleY, maxWidth, titleFont.getSize() + 10, maxLines);
 
-        g.setColor(new Color(84, 225, 255, 44));
-        g.fill(new RoundRectangle2D.Double(62, HEIGHT - 320, WIDTH - 124, 118, 26, 26));
-        g.setColor(new Color(155, 244, 255, 180));
-        g.draw(new RoundRectangle2D.Double(62, HEIGHT - 320, WIDTH - 124, 118, 26, 26));
+        g.setColor(withAlpha(theme.cardBackground(), 215));
+        g.fill(new RoundRectangle2D.Double(62, HEIGHT - 312, WIDTH - 124, 116, 24, 24));
+        g.setColor(withAlpha(theme.cardBorder(), 210));
+        g.draw(new RoundRectangle2D.Double(62, HEIGHT - 312, WIDTH - 124, 116, 24, 24));
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 34));
-        g.setColor(new Color(217, 251, 255));
-        g.drawString("GROWTH / DAY", 92, HEIGHT - 272);
+        g.setColor(theme.secondaryText());
+        g.setFont(new Font("SansSerif", Font.BOLD, 30));
+        g.drawString("TREND", 92, HEIGHT - 266);
 
-        String growthDay = row.getGrowthPerDay() == null ? "-" : ("+" + DECIMAL_FORMAT.format(row.getGrowthPerDay()));
-        g.setFont(new Font("SansSerif", Font.BOLD, 58));
-        g.setColor(Color.WHITE);
-        g.drawString(growthDay, 92, HEIGHT - 220);
+        g.setColor(theme.accent());
+        g.setFont(new Font("SansSerif", Font.BOLD, 56));
+        g.drawString(describeMetricValue(row), 92, HEIGHT - 214);
 
-        g.setFont(new Font("SansSerif", Font.PLAIN, 30));
-        g.setColor(new Color(233, 239, 255, 220));
-        g.drawString("Total: " + INTEGER_FORMAT.format(row.getLatestValue()) + " " + row.getMetricType().name().toLowerCase(Locale.ROOT), 74, HEIGHT - 158);
+        if (finalRank) {
+            g.setColor(withAlpha(theme.highlight(), 220));
+            g.setFont(new Font("SansSerif", Font.BOLD, 30));
+            g.drawString("NEW LEADER", WIDTH - 294, HEIGHT - 266);
+        }
 
         if (request.getIncludeTimestamp()) {
             g.setFont(new Font("SansSerif", Font.PLAIN, 24));
             String ts = "Generated " + LocalDateTime.now().format(TIMESTAMP_FORMATTER);
             FontMetrics metrics = g.getFontMetrics();
             int width = metrics.stringWidth(ts);
-            g.setColor(new Color(255, 255, 255, 190));
-            g.drawString(ts, WIDTH - width - 74, HEIGHT - 54);
+            g.setColor(withAlpha(theme.primaryText(), 190));
+            g.drawString(ts, WIDTH - width - 74, HEIGHT - 56);
         }
 
         g.setComposite(old);
     }
+
     private void drawCoverLayer(Graphics2D g, BufferedImage cover, float offsetX, float zoom, float alpha) {
         AlphaComposite old = (AlphaComposite) g.getComposite();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+
         int iw = Math.max(1, cover.getWidth());
         int ih = Math.max(1, cover.getHeight());
         double baseScale = Math.max(WIDTH / (double) iw, HEIGHT / (double) ih);
@@ -313,33 +334,35 @@ public class SocialRankingVideoService {
         int dx = Math.round((WIDTH - dw) / 2f + offsetX);
         int dy = (HEIGHT - dh) / 2;
         g.drawImage(cover, dx, dy, dw, dh, null);
+
         g.setComposite(old);
     }
 
-    private void drawProgress(Graphics2D g, int frame, int totalFrames) {
+    private void drawProgress(Graphics2D g, ThemeSpec theme, int frame, int totalFrames) {
         int barX = 66;
         int barY = HEIGHT - 144;
         int barW = WIDTH - 132;
         int barH = 14;
         float progress = Math.max(0f, Math.min(1f, frame / (float) totalFrames));
-        g.setColor(new Color(255, 255, 255, 46));
+
+        g.setColor(withAlpha(theme.primaryText(), 56));
         g.fillRoundRect(barX, barY, barW, barH, 16, 16);
-        g.setColor(new Color(80, 216, 255));
+        g.setColor(theme.accent());
         g.fillRoundRect(barX, barY, Math.round(barW * progress), barH, 16, 16);
     }
 
-    private void drawFooter(Graphics2D g, SocialRankingVideoRequest request) {
-        g.setColor(new Color(255, 255, 255, 170));
+    private void drawFooter(Graphics2D g, SocialRankingVideoRequest request, ThemeSpec theme) {
+        g.setColor(withAlpha(theme.primaryText(), 182));
         g.setFont(new Font("SansSerif", Font.PLAIN, 23));
-        g.drawString("Source: " + resolveSource(request.getSourceId()) + "  •  Bottom to top reveal", 68, HEIGHT - 92);
+        g.drawString("Source: " + resolveSource(request.getSourceId()) + " | Follow for weekly updates", 68, HEIGHT - 92);
     }
 
-    private void drawEmpty(Graphics2D g) {
-        g.setColor(new Color(255, 255, 255, 210));
-        g.setFont(new Font("SansSerif", Font.BOLD, 44));
+    private void drawEmpty(Graphics2D g, ThemeSpec theme) {
+        g.setColor(withAlpha(theme.primaryText(), 222));
+        g.setFont(new Font("SansSerif", Font.BOLD, 46));
         g.drawString("No ranking data available.", 120, HEIGHT / 2 - 20);
         g.setFont(new Font("SansSerif", Font.PLAIN, 30));
-        g.setColor(new Color(220, 231, 255, 220));
+        g.setColor(withAlpha(theme.secondaryText(), 220));
         g.drawString("Run scrape jobs, then retry /api/social-ranking.mp4", 120, HEIGHT / 2 + 34);
     }
 
@@ -393,12 +416,12 @@ public class SocialRankingVideoService {
 
     private String describeMetricValue(TrendingManhwaDTO row) {
         return switch (row.getRankingMode()) {
-            case RATE -> "Growth/day: " + (row.getGrowthPerDay() == null ? "-" : ("+" + DECIMAL_FORMAT.format(row.getGrowthPerDay())));
-            case ABS -> "Absolute growth: " + (row.getGrowth() == null ? "-" : ("+" + INTEGER_FORMAT.format(row.getGrowth())));
-            case PCT -> "Percent growth: " + (row.getGrowthPercent() == null ? "-" : ("+" + DECIMAL_FORMAT.format(row.getGrowthPercent() * 100) + "%"));
-            case TOTAL -> "Total: " + INTEGER_FORMAT.format(row.getLatestValue());
-            case ENGAGEMENT -> "Engagement score: " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
-            case ACCELERATION -> "Acceleration: " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
+            case RATE -> row.getGrowthPerDay() == null ? "Growth/day -" : ("Growth/day +" + DECIMAL_FORMAT.format(row.getGrowthPerDay()));
+            case ABS -> row.getGrowth() == null ? "Growth -" : ("Growth +" + INTEGER_FORMAT.format(row.getGrowth()));
+            case PCT -> row.getGrowthPercent() == null ? "Growth -" : ("Growth +" + DECIMAL_FORMAT.format(row.getGrowthPercent() * 100) + "%");
+            case TOTAL -> "Total " + INTEGER_FORMAT.format(row.getLatestValue());
+            case ENGAGEMENT -> "Engagement " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
+            case ACCELERATION -> "Acceleration " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
         };
     }
 
@@ -487,5 +510,110 @@ public class SocialRankingVideoService {
         graphics.drawString(letter, x, y);
         graphics.dispose();
         return img;
+    }
+
+    private String sanitizeTheme(String theme) {
+        if (theme == null || theme.isBlank()) {
+            return "clean";
+        }
+        String normalized = theme.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "clean", "neon", "dark" -> normalized;
+            default -> "clean";
+        };
+    }
+
+    private String sanitizeFormat(String format) {
+        if (format == null || format.isBlank()) {
+            return "instagram";
+        }
+        String normalized = format.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "tiktok", "instagram", "x" -> normalized;
+            default -> "instagram";
+        };
+    }
+
+    private String sanitizePace(String pace) {
+        if (pace == null || pace.isBlank()) {
+            return "standard";
+        }
+        String normalized = pace.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "fast", "standard" -> normalized;
+            default -> "standard";
+        };
+    }
+
+    private TimingSpec resolveTiming(String pace) {
+        if ("fast".equals(pace)) {
+            return new TimingSpec(8, Math.round(FPS * 0.5f), 0.15f, 0.20f);
+        }
+        return new TimingSpec(12, Math.round(FPS * 0.75f), 0.16f, 0.22f);
+    }
+
+    private ThemeSpec resolveTheme(String themeName) {
+        return switch (themeName) {
+            case "neon" -> new ThemeSpec(
+                    new Color(15, 8, 38),
+                    new Color(4, 7, 22),
+                    new Color(56, 236, 255),
+                    new Color(255, 96, 62),
+                    new Color(24, 19, 58),
+                    new Color(118, 238, 255),
+                    new Color(255, 255, 255),
+                    new Color(205, 233, 255),
+                    new Color(56, 236, 255),
+                    new Color(6, 20, 30)
+            );
+            case "dark" -> new ThemeSpec(
+                    new Color(16, 18, 26),
+                    new Color(8, 9, 14),
+                    new Color(123, 170, 255),
+                    new Color(255, 177, 89),
+                    new Color(30, 33, 44),
+                    new Color(132, 152, 184),
+                    new Color(250, 252, 255),
+                    new Color(208, 216, 232),
+                    new Color(255, 177, 89),
+                    new Color(30, 26, 14)
+            );
+            default -> new ThemeSpec(
+                    new Color(19, 24, 48),
+                    new Color(8, 10, 22),
+                    new Color(80, 216, 255),
+                    new Color(255, 114, 66),
+                    new Color(20, 28, 56),
+                    new Color(155, 244, 255),
+                    new Color(255, 255, 255),
+                    new Color(217, 251, 255),
+                    new Color(80, 216, 255),
+                    new Color(8, 20, 30)
+            );
+        };
+    }
+
+    private Color withAlpha(Color color, int alpha) {
+        return new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.max(0, Math.min(255, alpha)));
+    }
+
+    private record TimingSpec(int durationSeconds, int introFrames, float teaseWindow, float transitionWindow) {
+        private int totalFrames() {
+            return FPS * durationSeconds;
+        }
+    }
+
+    private record ThemeSpec(
+            Color backgroundTop,
+            Color backgroundBottom,
+            Color accent,
+            Color highlight,
+            Color cardBackground,
+            Color cardBorder,
+            Color primaryText,
+            Color secondaryText,
+            Color badgeColor,
+            Color badgeTextColor
+    ) {
     }
 }

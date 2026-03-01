@@ -68,9 +68,28 @@ Open:
 ## Social ranking image
 To generate a weekly-ready image that mirrors the trending board, call the new API:
 ```bash
-curl \"http://localhost:8080/api/social-ranking.png?metric=VIEWS&mode=RATE&limit=6\" --output weekly-ranking.png
+curl \"http://localhost:8080/api/social-ranking.png?metric=VIEWS&mode=RATE&limit=5\" --output weekly-ranking.png
 ```
 Add `sourceId` (1=Webtoons, 2=Asura, 3=Tapas) to limit to a source, or leave empty for all sources. Optional params `title`, `subtitle`, and `includeTimestamp` (true/false) customize the rendered banner.
+
+Render presets are also available on both image and video endpoints:
+- `theme=clean|neon|dark`
+- `format=tiktok|instagram|x`
+- `pace=fast|standard`
+
+Example image preset:
+```bash
+curl \"http://localhost:8080/api/social-ranking.png?metric=VIEWS&mode=RATE&theme=neon&format=instagram&pace=standard&limit=5\" --output weekly-ranking.png
+```
+
+Example video preset:
+```bash
+curl \"http://localhost:8080/api/social-ranking.mp4?metric=VIEWS&mode=RATE&theme=neon&format=tiktok&pace=fast&sourceId=2\" --output weekly-ranking.mp4
+```
+
+Video pacing presets:
+- `fast`: 8 seconds total, intro ~0.5s.
+- `standard`: 12 seconds total, intro ~0.75s.
 
 ### Asura cover caching
 The Asura scraper now downloads each series cover into `cover-cache/asura/` and stores the public `/covers/asura/...` URL in `manhwas.cover_image_url`. That local URL is served through the new `/covers/**` handler and is reused by the social image job, avoiding direct requests to the Asura CDN. Tune `app.cover-storage.path` or `app.cover-storage.base-url` (default `http://localhost:8080/covers`) when you want a different storage location or prefix.

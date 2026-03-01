@@ -20,4 +20,7 @@ public class SocialRankingImageRequest {
     private String title;
     private String subtitle;
     private Boolean includeTimestamp;
+    private String theme;
+    private String format;
+    private String pace;
 }

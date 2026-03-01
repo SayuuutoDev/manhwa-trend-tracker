@@ -13,7 +13,11 @@ public class SocialRankingVideoRequest {
     private MetricType metric;
     private TrendingRankingMode mode;
     private Integer sourceId;
+    private Integer limit;
     private String title;
     private String subtitle;
     private Boolean includeTimestamp;
+    private String theme;
+    private String format;
+    private String pace;
 }

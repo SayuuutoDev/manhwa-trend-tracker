@@ -1,6 +1,6 @@
 # Manhwa Trend Tracker - Engineering Context
 
-Last updated: 2026-02-15
+Last updated: 2026-03-01
 
 ## 1) Project Purpose
 - Aggregate manhwa metrics from multiple sources (Asura, Tapas, Webtoon).
@@ -126,7 +126,14 @@ Last updated: 2026-02-15
 - Database backup convention:
   - Store compressed dumps under `backups/` as `manhwa_trends_YYYYMMDD_HHMMSS.sql.gz`.
 - Social image job:
-  - `GET /api/social-ranking.png` returns a PNG of the current leaderboard with query params `metric`, `mode`, `sourceId`, `limit`, `title`, `subtitle`, and `includeTimestamp`. Default limit is 8, mode RATE, and source = all.
+  - `GET /api/social-ranking.png` returns a PNG of the current leaderboard.
+  - `GET /api/social-ranking.mp4` returns an MP4 ranking reveal clip.
+  - Shared query params: `metric`, `mode`, `sourceId`, `limit`, `title`, `subtitle`, `includeTimestamp`, `theme`, `format`, `pace`.
+  - Presets:
+    - `theme=clean|neon|dark`
+    - `format=tiktok|instagram|x`
+    - `pace=fast|standard` (video timing: 8s fast, 12s standard).
+  - Current social-focused limits are clamped to 3-5 entries for readability.
 - Asura cover cache:
   - `app.cover-storage.path` points to the directory where Asura covers are downloaded, and `/covers/**` serves them via `app.cover-storage.base-url` (default `http://localhost:8080/covers`). The cached URL is stored in `manhwas.cover_image_url`.
 
