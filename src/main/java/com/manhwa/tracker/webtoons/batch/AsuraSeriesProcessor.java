@@ -10,9 +10,10 @@ import com.manhwa.tracker.webtoons.model.TitleSource;
 import com.manhwa.tracker.webtoons.repository.ManhwaExternalIdRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaRepository;
 import com.manhwa.tracker.webtoons.repository.ManhwaTitleRepository;
-import com.manhwa.tracker.webtoons.service.CoverSelectionService;
 import com.manhwa.tracker.webtoons.service.MangaUpdatesEnrichmentService;
 import com.manhwa.tracker.webtoons.service.TitleNormalizer;
+import com.manhwa.tracker.webtoons.service.CoverSelectionService;
+import com.manhwa.tracker.webtoons.service.LocalCoverStorageService;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -27,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,6 +47,7 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
     private final ManhwaTitleRepository manhwaTitleRepository;
     private final ManhwaExternalIdRepository manhwaExternalIdRepository;
     private final CoverSelectionService coverSelectionService;
+    private final LocalCoverStorageService localCoverStorageService;
     private final MangaUpdatesEnrichmentService mangaUpdatesEnrichmentService;
     private final List<String> skippedTitles = new ArrayList<>();
 
@@ -258,9 +261,17 @@ public class AsuraSeriesProcessor implements ItemProcessor<AsuraSeriesDTO, Metri
         String description = extractDescription(doc);
         String genre = extractGenres(doc);
 
-        coverSelectionService.upsertCoverCandidate(manhwaId, TitleSource.ASURA, coverImageUrl);
-
         boolean updated = false;
+
+        coverSelectionService.upsertCoverCandidate(manhwaId, TitleSource.ASURA, coverImageUrl);
+        if (coverImageUrl != null && !coverImageUrl.isBlank()) {
+            Optional<String> cachedCoverUrl = localCoverStorageService.storeCover(manhwaId, TitleSource.ASURA, coverImageUrl);
+            if (cachedCoverUrl.isPresent() && !cachedCoverUrl.get().equals(manhwa.getCoverImageUrl())) {
+                manhwa.setCoverImageUrl(cachedCoverUrl.get());
+                updated = true;
+            }
+        }
+
         if (description != null && !description.isBlank() &&
                 !description.equals(manhwa.getDescription())) {
             manhwa.setDescription(description);

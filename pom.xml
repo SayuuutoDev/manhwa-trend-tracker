@@ -71,12 +71,22 @@
 			<artifactId>spring-batch-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-		<dependency>
-			<groupId>org.jsoup</groupId>
-			<artifactId>jsoup</artifactId>
-			<version>1.17.2</version>
-		</dependency>
-	</dependencies>
+			<dependency>
+				<groupId>org.jsoup</groupId>
+				<artifactId>jsoup</artifactId>
+				<version>1.17.2</version>
+			</dependency>
+			<dependency>
+				<groupId>org.sejda.imageio</groupId>
+				<artifactId>webp-imageio</artifactId>
+				<version>0.1.6</version>
+			</dependency>
+			<dependency>
+				<groupId>org.jcodec</groupId>
+				<artifactId>jcodec-javase</artifactId>
+				<version>0.2.5</version>
+			</dependency>
+		</dependencies>
 
 	<build>
 		<plugins>

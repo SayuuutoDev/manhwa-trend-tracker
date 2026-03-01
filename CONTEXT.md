@@ -120,11 +120,15 @@ Last updated: 2026-02-15
 
 ## 8) Operational Notes
 - Backend run (scrape profile, no auto scrape):
-- `./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments=--app.scrape.enabled=false`
+  - `./mvnw -q spring-boot:run -Dspring-boot.run.profiles=scrape -Dspring-boot.run.arguments=--app.scrape.enabled=false`
 - Frontend run:
-- `cd ui && npm run dev`
+  - `cd ui && npm run dev`
 - Database backup convention:
-- Store compressed dumps under `backups/` as `manhwa_trends_YYYYMMDD_HHMMSS.sql.gz`.
+  - Store compressed dumps under `backups/` as `manhwa_trends_YYYYMMDD_HHMMSS.sql.gz`.
+- Social image job:
+  - `GET /api/social-ranking.png` returns a PNG of the current leaderboard with query params `metric`, `mode`, `sourceId`, `limit`, `title`, `subtitle`, and `includeTimestamp`. Default limit is 8, mode RATE, and source = all.
+- Asura cover cache:
+  - `app.cover-storage.path` points to the directory where Asura covers are downloaded, and `/covers/**` serves them via `app.cover-storage.base-url` (default `http://localhost:8080/covers`). The cached URL is stored in `manhwas.cover_image_url`.
 
 ## 9) What To Update In This File
 - Update this file whenever you change:

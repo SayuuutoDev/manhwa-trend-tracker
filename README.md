@@ -12,7 +12,7 @@ This repo has two parts:
 ## Database
 Start PostgreSQL via Docker:
 ```bash
-docker compose up -d
+docker-compose up
 ```
 
 ## Backend (API)
@@ -64,6 +64,16 @@ npm run dev
 Open:
 - `http://localhost:5173/` (Trending page)
 - `http://localhost:5173/batches` (Batch Runner page for running jobs + live progress)
+
+## Social ranking image
+To generate a weekly-ready image that mirrors the trending board, call the new API:
+```bash
+curl \"http://localhost:8080/api/social-ranking.png?metric=VIEWS&mode=RATE&limit=6\" --output weekly-ranking.png
+```
+Add `sourceId` (1=Webtoons, 2=Asura, 3=Tapas) to limit to a source, or leave empty for all sources. Optional params `title`, `subtitle`, and `includeTimestamp` (true/false) customize the rendered banner.
+
+### Asura cover caching
+The Asura scraper now downloads each series cover into `cover-cache/asura/` and stores the public `/covers/asura/...` URL in `manhwas.cover_image_url`. That local URL is served through the new `/covers/**` handler and is reused by the social image job, avoiding direct requests to the Asura CDN. Tune `app.cover-storage.path` or `app.cover-storage.base-url` (default `http://localhost:8080/covers`) when you want a different storage location or prefix.
 
 ## Troubleshooting
 If Maven fails with `Permission denied` in `target/`, fix ownership:
