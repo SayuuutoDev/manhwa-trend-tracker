@@ -1,89 +1,145 @@
-# Social Media Render Review (Image + Video)
+# Social Media Rendering Pipeline Review (Updated)
 
 ## Executive summary
-Current rendering is functional but not yet optimized for social-native performance (hook speed, motion rhythm, readability on small screens, and brand consistency). The output looks like an internal dashboard exported to media rather than content designed for TikTok/IG Reels/X feed behavior.
+The social rendering pipeline has moved from a dashboard-style exporter to a social-first generator with configurable presets for **theme**, **format**, and **pace** across both PNG and MP4 outputs. Recent updates materially improved hook speed, duration control, readability, and visual identity. The system is now suitable for daily automated publishing, with the biggest remaining opportunities in analytics-driven optimization (A/B testing, creator templates, and CTA/pacing personalization).
 
-## What works today
-- Correct vertical video canvas (`1080x1920`) for short-form platforms.
-- Video includes motion and ranking reveal, which is better than static slides.
-- Image includes clear ranking rows, cover art, and metric labels.
-- Fallback behavior for missing covers is robust.
+---
 
-## Why it currently feels "not cool"
+## What changed recently (vs previous review)
 
-### 1) Weak first-second hook in video
-- Video uses a 2-second intro window before ranking reveal starts (`INTRO_FRAMES = FPS * 2`).
-- On social platforms, the first 0.3–1.0s usually decides retention.
-- Recommendation: reduce intro to ~0.5–0.8s and put rank #1 teaser immediately in frame.
+### ✅ Delivered improvements
+1. **Hook speed is now social-friendly**
+   - Intro timing now depends on pace profile:
+     - `fast`: ~0.5s intro
+     - `standard`: ~0.75s intro
+   - This directly addresses the prior concern that the first reveal started too late. 
 
-### 2) Duration is too long for repeatability
-- Current video duration is 15 seconds.
-- For daily ranking clips, 7–10s often performs better (more loops, higher completion).
-- Recommendation: ship 2 presets: `FAST` (8s), `STANDARD` (12s).
+2. **Video duration presets are now implemented**
+   - `pace=fast` renders at **8s**.
+   - `pace=standard` renders at **12s**.
+   - Prior fixed 15s duration is gone.
 
-### 3) Typography hierarchy is inconsistent with mobile viewing
-- There are many text layers per entry (`label`, `metric`, `total`, `mode`) and several are too subtle at phone scroll speed.
-- "Mode" text is useful for internal validation but low value for end users.
-- Recommendation: simplify each card to 2 key lines max: title + one metric story.
+3. **Theme presets are now implemented end-to-end**
+   - Shared sanitized presets: `clean | neon | dark`.
+   - Both image and video pipelines resolve style tokens (background, accent, highlight, card/badge/text colors) per theme.
 
-### 4) Color/mood reads as generic dashboard
-- Both image/video use blue gradients with glass cards and modest contrast accents.
-- Social winners usually have a stronger visual signature (high-contrast accents, bold badges, cleaner spacing).
-- Recommendation: define a brand kit: one primary gradient, one accent, one warning/highlight, and consistent badge style.
+4. **Platform-oriented format presets now affect card density**
+   - `format=x` defaults toward 3 entries.
+   - `format=tiktok` defaults toward 4 entries.
+   - `format=instagram` defaults toward 5 entries.
+   - Limits are clamped to a social readability window (3–5).
 
-### 5) Motion language lacks punch moments
-- Current reveal is smooth but mostly linear and utility-oriented.
-- Recommendation: add:
-  - beat-synced pop for rank changes,
-  - stronger easing for #1 reveal,
-  - subtle zoom pulse at peak frame,
-  - optional audio-reactive timing later.
+5. **Information density was reduced in cards**
+   - Previous low-value lines (notably explicit `Mode:` utility copy) are no longer rendered on ranking entries.
+   - Cards now focus on title + key trend signal.
 
-### 6) Information density in image is too high
-- The image includes title, metric story, total value, mode, and full row framing for each entry.
-- In feed contexts (X/IG), too much microtext reduces skim value.
-- Recommendation: make image composition "poster first":
-  - large headline,
-  - 3–5 entries max,
-  - bold delta metric,
-  - minimal metadata in footer only.
+6. **Motion language got stronger reveal beats**
+   - Added rank tease overlay (“NEXT RANK” + large rank number) before reveal.
+   - Transition windows include crossfade/position/zoom choreography.
+   - #1 highlight gets explicit “NEW LEADER” treatment.
 
-### 7) Missing creator-friendly customization layer
-- APIs already support title/subtitle/timestamp, but there is no theme preset system for platform-specific variants.
-- Recommendation: add query presets:
-  - `theme=neon|clean|dark`,
-  - `format=tiktok|instagram|x`,
-  - `pace=fast|standard`.
+7. **Asura cover reliability improved in social outputs**
+   - Rendering path now attempts local cover caching for Asura rows when needed.
+   - Fallback placeholder remains in place for robustness.
 
-## Concrete rendering improvements (prioritized)
+---
 
-### P0 (high impact, low-to-medium effort)
-1. Shorten intro and total video duration.
-2. Remove low-value text fields from cards (`Mode:` line on image/video).
-3. Increase headline contrast and rank badge prominence.
-4. Limit visible entries to 3–5 for both image and video outputs.
+## Current pipeline architecture
 
-### P1 (high impact, medium effort)
-1. Add brand theme presets (palette + fonts + badge style).
-2. Add motion preset profiles (`FAST` / `STANDARD`).
-3. Add "hook templates" (e.g., "Biggest breakout today", "New #1").
+### API surface
+- `GET /api/social-ranking.png`
+- `GET /api/social-ranking.mp4`
+- Shared query params:
+  - `metric`, `mode`, `sourceId`, `limit`, `title`, `subtitle`, `includeTimestamp`, `theme`, `format`, `pace`
 
-### P2 (strategic)
-1. A/B test render variants and track watch-through/post CTR.
-2. Auto-generate per-platform exports with different safe-area spacing.
-3. Add watermark/logo placement and @handle CTA module.
+### Data and rendering flow
+1. Request normalization/sanitization.
+2. Trending data fetch from `TrendingService`.
+3. Limit clamp and row slicing.
+4. Cover resolution (direct URL or Asura-local-cached URL).
+5. Renderer composes themed output:
+   - PNG: poster/card stack composition.
+   - MP4: intro → tease → reveal scenes with progress/footer.
+6. Return binary payload with no-cache response headers.
 
-## Code-level observations (where to start)
-- Video timing constants are currently hardcoded in `SocialRankingVideoService` (`FPS`, `DURATION_SECONDS`, `INTRO_FRAMES`, reveal windows).
-- Video footer currently includes utility copy that could be replaced by CTA/handle.
-- Image rows currently render `Mode:` and `Total:` line details that can be simplified for feed readability.
+---
 
-## Suggested acceptance criteria for a redesign
-- First ranking element appears within first 0.8s.
-- Final duration configurable (8s/12s presets).
-- At least one theme preset with stronger contrast.
-- Readability validated on a 6-inch mobile viewport at 50% brightness.
-- Export variants for TikTok/Reels and X image cards.
+## Detailed assessment by quality dimension
 
-## Final take
-Your rendering system is technically strong and already close to production utility. To make it "social-media cool," prioritize hook speed, simplified storytelling per frame, and stronger visual identity over extra metric detail.
+### 1) Hook and retention readiness — **Improved to Good**
+- Fast intro and shorter presets now align with short-form behavior.
+- Rank tease before reveal is a real retention upgrade.
+- Remaining gap: no adaptive pacing by content velocity (e.g., bigger deltas get longer hold).
+
+### 2) Readability on mobile — **Good**
+- Entry cap to 3–5 significantly lowers visual crowding.
+- Simplified metric storytelling improves scan speed.
+- Remaining gap: long-title handling in video can still consume many lines; add stricter per-format line caps.
+
+### 3) Visual identity / “cool factor” — **Good**
+- Theme presets meaningfully improve brand expression and contrast.
+- Badges and accent colors are now clearer focal points.
+- Remaining gap: no brand asset module (logo lockup, handle, campaign sticker template).
+
+### 4) Motion language — **Good, still extensible**
+- Scene transitions and tease overlay provide better cadence than static utility transitions.
+- #1 callout helps climax framing.
+- Remaining gap: no beat-synced/audio-aware rhythm and no micro-bounce dynamics on rank badge/title.
+
+### 5) Platform fit and export strategy — **Solid baseline**
+- Format presets now influence default density and behavior.
+- Shared API params support automated platform variants.
+- Remaining gap: no explicit safe-area layout templates per platform UI chrome.
+
+### 6) Operational robustness — **Good**
+- Fallback cover path and exception handling are in place.
+- Asura local caching reduces external image fragility.
+- Remaining gap: no per-render telemetry (render time, fallback count, dropped rows, quality flags).
+
+---
+
+## Gap analysis against prior recommendations
+
+| Prior recommendation | Status | Notes |
+|---|---|---|
+| Intro within first ~0.8s | ✅ Done | Fast/standard intro windows now social-aligned. |
+| Duration presets (8s/12s) | ✅ Done | `pace=fast|standard` implemented. |
+| Remove low-value card text | ✅ Done | Utility “Mode” style lines removed from card output. |
+| Limit entries to 3–5 | ✅ Done | Format defaults + clamp enforce social density. |
+| Theme preset system | ✅ Done | `clean/neon/dark` for image + video. |
+| Hook templates | ⚠️ Partial | Tease overlay exists; reusable narrative templates still limited. |
+| Per-platform safe-area exports | ❌ Not done | No explicit template engine for safe zones yet. |
+| A/B testing and CTR/watch-through loop | ❌ Not done | No analytics feedback loop wired into renderer. |
+
+---
+
+## Recommended next wave (prioritized)
+
+### P0 (high impact)
+1. Add **safe-area profiles** (`tiktok`, `reels`, `x`) for title/footer/CTA anchoring.
+2. Add **CTA module** (`@handle`, “follow for daily rankings”, campaign tag) with theme-aware styling.
+3. Add **render telemetry** (duration, fallback-cover hit rate, top title length, scene timing profile).
+
+### P1
+1. Introduce **hook templates** (`new #1`, `biggest mover`, `comeback`) selected by ranking deltas.
+2. Add **title truncation rules per format** with stricter line budgets.
+3. Support optional **motion intensity** (`calm|standard|hype`) independent of pace.
+
+### P2
+1. Analytics-driven **auto-preset selection** based on historical completion/engagement.
+2. Lightweight **A/B render variants** with deterministic IDs for experiment tracking.
+3. Batch endpoint for **multi-export package generation** (PNG + MP4 variants in one job).
+
+---
+
+## Acceptance criteria for “social-grade v2”
+- Safe-area-aware layouts for at least TikTok/Reels and X.
+- Built-in CTA/branding module configurable by query param.
+- Render telemetry emitted and observable in logs/metrics.
+- At least 2 hook templates chosen dynamically from ranking context.
+- Documented recommended presets for daily posting workflow.
+
+---
+
+## Final verdict
+The latest updates substantially resolved the biggest weaknesses identified in the earlier review. The pipeline is now **social-capable and production-usable** with strong preset foundations. The next milestone is shifting from “good rendering” to “performance-optimized publishing” through safe-area templates, CTA branding, and analytics feedback loops.
