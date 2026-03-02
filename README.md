@@ -2,7 +2,7 @@
 
 This repo has two parts:
 - Backend (Spring Boot): scraping + API.
-- Frontend (Vite + React): Asura-only trending leaderboard UI.
+- Frontend (Vite + React): multi-source trending + batch runner UI.
 
 ## Prerequisites
 - Java 21+
@@ -28,7 +28,10 @@ To enable scraping jobs, use the `scrape` profile:
 
 API examples:
 - Asura-only trending (followers): `http://localhost:8080/api/trending?metric=FOLLOWERS&limit=10&sourceId=2`
-- Generic trending (all sources, views): `http://localhost:8080/api/trending?metric=VIEWS&limit=10`
+- Generic trending (all sources, views): `http://localhost:8080/api/trending?metric=VIEWS&limit=10&window=WEEKLY`
+- Daily breakout (source-aware floor): `http://localhost:8080/api/trending?metric=VIEWS&mode=PCT&window=DAILY&limit=10`
+- Social composite score: `http://localhost:8080/api/trending?metric=VIEWS&mode=SOCIAL&window=DAILY&limit=10`
+- Genre cohort filter example: `http://localhost:8080/api/trending?metric=VIEWS&mode=RATE&genre=action&window=WEEKLY`
 - List batch job status/progress: `http://localhost:8080/api/batches`
 - Start a batch job manually: `POST http://localhost:8080/api/batches/asuraScrapeJob/start`
 
@@ -74,17 +77,29 @@ Add `sourceId` (1=Webtoons, 2=Asura, 3=Tapas) to limit to a source, or leave emp
 
 Render presets are also available on both image and video endpoints:
 - `theme=clean|neon|dark`
-- `format=tiktok|instagram|x`
+- `format=tiktok|instagram|reels|x`
 - `pace=fast|standard`
+- `intensity=calm|standard|hype`
+- `variant=A|B` (deterministic A/B visual variant)
 
 Example image preset:
 ```bash
-curl \"http://localhost:8080/api/social-ranking.png?metric=VIEWS&mode=RATE&theme=neon&format=instagram&pace=standard&limit=5\" --output weekly-ranking.png
+curl \"http://localhost:8080/api/social-ranking.png?metric=VIEWS&mode=RATE&window=DAILY&theme=neon&format=instagram&pace=standard&intensity=standard&limit=5\" --output daily-ranking.png
 ```
 
 Example video preset:
 ```bash
-curl \"http://localhost:8080/api/social-ranking.mp4?metric=VIEWS&mode=RATE&theme=neon&format=tiktok&pace=fast&sourceId=2\" --output weekly-ranking.mp4
+curl \"http://localhost:8080/api/social-ranking.mp4?metric=VIEWS&mode=RATE&window=DAILY&theme=neon&format=tiktok&pace=fast&intensity=hype&sourceId=2\" --output daily-ranking.mp4
+```
+
+Multi-export bundle (PNG + MP4 + metadata JSON):
+```bash
+curl \"http://localhost:8080/api/social-ranking.bundle?metric=VIEWS&mode=ABS&window=WEEKLY&format=reels&theme=dark&pace=standard\" --output social-bundle.zip
+```
+
+Auto-generated social queue suggestions:
+```bash
+curl \"http://localhost:8080/api/social-ranking/queue?sourceId=2\"
 ```
 
 Video pacing presets:

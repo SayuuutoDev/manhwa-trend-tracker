@@ -6,5 +6,6 @@ public enum TrendingRankingMode {
     PCT,
     TOTAL,
     ENGAGEMENT,
-    ACCELERATION
+    ACCELERATION,
+    SOCIAL
 }

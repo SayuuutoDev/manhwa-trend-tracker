@@ -1,6 +1,6 @@
 # Manhwa Trend Tracker - Engineering Context
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 ## 1) Project Purpose
 - Aggregate manhwa metrics from multiple sources (Asura, Tapas, Webtoon).
@@ -37,20 +37,24 @@ Last updated: 2026-03-01
 ### Frontend pages
 - `/` trending page:
 - Source panels (Asura, Tapas, Webtoon).
+- Daily/weekly window toggle.
+- Multiple ranking modes including ABS, RATE, PCT, TOTAL, ENGAGEMENT, ACCELERATION, and SOCIAL.
+- Confidence badge metadata from backend.
 - Growth ranking cards with click-through read URL.
-- Growth and growth/day shown (to explain RATE ordering).
 - `/batches` batch runner page:
 - Start/stop jobs.
 - Polling status with counters and progress.
 
 ## 3) Ranking Design (Current)
 - Main endpoint: `GET /api/trending`.
-- Parameters: `metric`, `sourceId`, `limit`, `mode=ABS|RATE|PCT`.
+- Parameters: `metric`, `sourceId`, `limit`, `mode=ABS|RATE|PCT|TOTAL|ENGAGEMENT|ACCELERATION|SOCIAL`, `window=DAILY|WEEKLY`, optional `genre`, optional `minPreviousValue`.
 - Current default behavior is rate-based ranking for most panels.
 - SQL safeguards:
 - Latest snapshot must be recent (within 3 days).
 - Baseline must be at least 6 hours apart.
-- Baseline is nearest point around ~7 days prior, not strict exact 7-day.
+- Baseline is nearest point around the requested window (`daily=1 day`, `weekly=7 days`), not strict exact timestamp matching.
+- Backend now derives source-aware breakout floors when `mode=PCT` and `minPreviousValue` is omitted.
+- Backend now returns confidence metadata (`confidenceScore`, `confidenceLabel`, `snapshotAgeHours`, `baselineCoverage`) for ranking cards.
 - Excluded genres are config-driven:
 - `app.ranking.excluded-genres` in `application.properties`.
 
@@ -128,12 +132,17 @@ Last updated: 2026-03-01
 - Social image job:
   - `GET /api/social-ranking.png` returns a PNG of the current leaderboard.
   - `GET /api/social-ranking.mp4` returns an MP4 ranking reveal clip.
-  - Shared query params: `metric`, `mode`, `sourceId`, `limit`, `title`, `subtitle`, `includeTimestamp`, `theme`, `format`, `pace`.
+  - `GET /api/social-ranking.bundle` returns a ZIP package (`.png` + `.mp4` + `metadata.json`) for one-call multi-export.
+  - `GET /api/social-ranking/queue` returns generated posting queue suggestions seeded from live rankings.
+  - Shared query params: `metric`, `mode`, `window`, `sourceId`, `genre`, `limit`, `minPreviousValue`, `title`, `subtitle`, `includeTimestamp`, `theme`, `format`, `pace`, `intensity`, `ctaHandle`, `ctaText`, `campaignTag`, `variant`.
   - Presets:
     - `theme=clean|neon|dark`
-    - `format=tiktok|instagram|x`
-    - `pace=fast|standard` (video timing: 8s fast, 12s standard).
+    - `format=tiktok|instagram|reels|x` (safe-area-aware layout profiles)
+    - `pace=fast|standard` (video timing: 8s fast, 12s standard)
+    - `intensity=calm|standard|hype` (motion profile independent of pace)
+    - `variant=A|B` (deterministic A/B visual variant)
   - Current social-focused limits are clamped to 3-5 entries for readability.
+  - Render telemetry is logged for image and video outputs (duration, fallback cover count, longest title, and profile info).
 - Asura cover cache:
   - `app.cover-storage.path` points to the directory where Asura covers are downloaded, and `/covers/**` serves them via `app.cover-storage.base-url` (default `http://localhost:8080/covers`). The cached URL is stored in `manhwas.cover_image_url`.
 

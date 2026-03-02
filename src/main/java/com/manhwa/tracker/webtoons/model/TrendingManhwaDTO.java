@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 public class TrendingManhwaDTO {
     private Long manhwaId;
     private String title;
+    private String genre;
     private MetricType metricType;
     private String coverImageUrl;
     private String readUrl;
@@ -22,5 +23,9 @@ public class TrendingManhwaDTO {
     private Double growthPerDay;
     private Double growthPercent;
     private Double rankingScore;
+    private Double confidenceScore;
+    private String confidenceLabel;
+    private Integer snapshotAgeHours;
+    private Double baselineCoverage;
     private TrendingRankingMode rankingMode;
 }

@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 public interface TrendingProjection {
     Long getManhwaId();
     String getTitle();
+    String getGenre();
     String getCoverImageUrl();
     String getReadUrl();
     Long getLatestValue();

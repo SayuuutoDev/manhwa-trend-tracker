@@ -1,21 +1,27 @@
 export type MetricType = "VIEWS" | "FOLLOWERS" | "SUBSCRIBERS" | "LIKES";
-export type RankingMode = "ABS" | "RATE" | "PCT" | "TOTAL" | "ENGAGEMENT" | "ACCELERATION";
+export type RankingMode = "ABS" | "RATE" | "PCT" | "TOTAL" | "ENGAGEMENT" | "ACCELERATION" | "SOCIAL";
+export type RankingWindow = "DAILY" | "WEEKLY";
 
 export type TrendingManhwa = {
   manhwaId: number;
   title: string;
+  genre?: string | null;
   metricType: MetricType;
   coverImageUrl?: string | null;
   readUrl?: string | null;
   latestValue: number;
-  latestAt: string;
-  previousValue: number;
-  previousAt: string;
-  growth: number;
-  baselineDays: number;
-  growthPerDay: number;
+  latestAt: string | null;
+  previousValue: number | null;
+  previousAt: string | null;
+  growth: number | null;
+  baselineDays: number | null;
+  growthPerDay: number | null;
   growthPercent?: number | null;
   rankingScore?: number | null;
+  confidenceScore?: number | null;
+  confidenceLabel?: string | null;
+  snapshotAgeHours?: number | null;
+  baselineCoverage?: number | null;
   rankingMode: RankingMode;
 };
 
@@ -41,4 +47,11 @@ export type BatchStartResponse = {
   jobName: string;
   executionId: number;
   message: string;
+};
+
+export type SocialQueueItem = {
+  id: string;
+  title: string;
+  endpoint: string;
+  query: string;
 };

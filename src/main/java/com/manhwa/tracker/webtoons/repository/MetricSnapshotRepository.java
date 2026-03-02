@@ -13,6 +13,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
     @Query(value = """
             SELECT m.id AS manhwaId,
                    m.canonical_title AS title,
+                   m.genre AS genre,
                    COALESCE(NULLIF(m.cover_image_url, ''), '/images/cover-fallback.svg') AS coverImageUrl,
                    r.read_url AS readUrl,
                    l.metric_value AS latestValue,
@@ -56,7 +57,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
                   AND ms.metric_type = :metricType
                   AND (:sourceId IS NULL OR ms.source_id = :sourceId)
                   AND ms.captured_at < l.captured_at
-                ORDER BY ABS(EXTRACT(EPOCH FROM ((l.captured_at - INTERVAL '7 days') - ms.captured_at))) ASC,
+                ORDER BY ABS(EXTRACT(EPOCH FROM ((l.captured_at - make_interval(days => :windowDays)) - ms.captured_at))) ASC,
                          ms.captured_at DESC
                 LIMIT 1
             ) p ON TRUE
@@ -110,12 +111,14 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
             @Param("limit") int limit,
             @Param("rankingMode") String rankingMode,
             @Param("excludedGenresRegex") String excludedGenresRegex,
-            @Param("minPreviousValue") Long minPreviousValue
+            @Param("minPreviousValue") Long minPreviousValue,
+            @Param("windowDays") int windowDays
     );
 
     @Query(value = """
             SELECT m.id AS manhwaId,
                    m.canonical_title AS title,
+                   m.genre AS genre,
                    COALESCE(NULLIF(m.cover_image_url, ''), '/images/cover-fallback.svg') AS coverImageUrl,
                    r.read_url AS readUrl,
                    l.metric_value AS latestValue,
@@ -178,6 +181,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
     @Query(value = """
             SELECT m.id AS manhwaId,
                    m.canonical_title AS title,
+                   m.genre AS genre,
                    COALESCE(NULLIF(m.cover_image_url, ''), '/images/cover-fallback.svg') AS coverImageUrl,
                    r.read_url AS readUrl,
                    n.metric_value AS latestValue,
@@ -253,6 +257,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
     @Query(value = """
             SELECT m.id AS manhwaId,
                    m.canonical_title AS title,
+                   m.genre AS genre,
                    COALESCE(NULLIF(m.cover_image_url, ''), '/images/cover-fallback.svg') AS coverImageUrl,
                    r.read_url AS readUrl,
                    l.metric_value AS latestValue,

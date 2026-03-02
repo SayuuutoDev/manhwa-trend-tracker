@@ -1,6 +1,7 @@
 package com.manhwa.tracker.webtoons.api;
 
 import com.manhwa.tracker.webtoons.model.MetricType;
+import com.manhwa.tracker.webtoons.model.RankingWindow;
 import com.manhwa.tracker.webtoons.model.TrendingManhwaDTO;
 import com.manhwa.tracker.webtoons.model.TrendingRankingMode;
 import com.manhwa.tracker.webtoons.service.TrendingService;
@@ -26,9 +27,11 @@ public class TrendingController {
             @RequestParam(name = "limit", defaultValue = "10") int limit,
             @RequestParam(name = "sourceId", required = false) Integer sourceId,
             @RequestParam(name = "mode", defaultValue = "RATE") TrendingRankingMode mode,
+            @RequestParam(name = "window", defaultValue = "WEEKLY") RankingWindow window,
+            @RequestParam(name = "genre", required = false) String genre,
             @RequestParam(name = "minPreviousValue", required = false) Long minPreviousValue
     ) {
         int cappedLimit = Math.min(Math.max(limit, 1), 100);
-        return trendingService.getTrending(metric, sourceId, cappedLimit, mode, minPreviousValue);
+        return trendingService.getTrending(metric, sourceId, cappedLimit, mode, window, genre, minPreviousValue);
     }
 }

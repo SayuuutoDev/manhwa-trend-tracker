@@ -7,42 +7,63 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiError> handleBadRequest(IllegalArgumentException ex) {
-        ApiError error = new ApiError(ex.getMessage(), LocalDateTime.now());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(error);
+    public ResponseEntity<?> handleBadRequest(IllegalArgumentException ex, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
     }
 
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ApiError> handleConflict(IllegalStateException ex) {
-        ApiError error = new ApiError(ex.getMessage(), LocalDateTime.now());
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(error);
+    public ResponseEntity<?> handleConflict(IllegalStateException ex, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, ex.getMessage(), request);
     }
 
     @ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<ApiError> handleResponseStatus(ResponseStatusException ex) {
+    public ResponseEntity<?> handleResponseStatus(ResponseStatusException ex, HttpServletRequest request) {
         String message = ex.getReason() == null || ex.getReason().isBlank()
                 ? "Unexpected error. Please try again."
                 : ex.getReason();
-        ApiError error = new ApiError(message, LocalDateTime.now());
-        return ResponseEntity.status(ex.getStatusCode())
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(error);
+        return buildErrorResponse(ex.getStatusCode().value(), message, request);
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handle(Exception ex) {
-        ApiError error = new ApiError("Unexpected error. Please try again.", LocalDateTime.now());
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(error);
+    public ResponseEntity<?> handle(Exception ex, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error. Please try again.", request);
+    }
+
+    private ResponseEntity<?> buildErrorResponse(int statusCode, String message, HttpServletRequest request) {
+        MediaType mediaType = resolveMediaType(request);
+        if (mediaType != null) {
+            return ResponseEntity.status(statusCode)
+                    .contentType(mediaType)
+                    .body(new byte[0]);
+        }
+        ApiError error = new ApiError(message, LocalDateTime.now());
+        return ResponseEntity.status(statusCode).body(error);
+    }
+
+    private ResponseEntity<?> buildErrorResponse(HttpStatus status, String message, HttpServletRequest request) {
+        return buildErrorResponse(status.value(), message, request);
+    }
+
+    private MediaType resolveMediaType(HttpServletRequest request) {
+        if (request == null || request.getRequestURI() == null) {
+            return null;
+        }
+        String path = request.getRequestURI().toLowerCase();
+        if (path.endsWith(".mp4")) {
+            return MediaType.parseMediaType("video/mp4");
+        }
+        if (path.endsWith(".png")) {
+            return MediaType.IMAGE_PNG;
+        }
+        if (path.endsWith(".bundle")) {
+            return MediaType.parseMediaType("application/zip");
+        }
+        return null;
     }
 }

@@ -1,14 +1,12 @@
 package com.manhwa.tracker.webtoons.social;
 
 import org.springframework.http.CacheControl;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api")
@@ -28,7 +26,10 @@ public class SocialRankingImageController {
                     .cacheControl(CacheControl.noCache())
                     .body(payload);
         } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to render social image", e);
+            return ResponseEntity.internalServerError()
+                    .contentType(MediaType.IMAGE_PNG)
+                    .cacheControl(CacheControl.noCache())
+                    .body(new byte[0]);
         }
     }
 }

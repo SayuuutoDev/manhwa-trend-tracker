@@ -1,11 +1,14 @@
 package com.manhwa.tracker.webtoons.social;
 
 import com.manhwa.tracker.webtoons.model.MetricType;
+import com.manhwa.tracker.webtoons.model.RankingWindow;
 import com.manhwa.tracker.webtoons.model.TitleSource;
 import com.manhwa.tracker.webtoons.model.TrendingManhwaDTO;
 import com.manhwa.tracker.webtoons.model.TrendingRankingMode;
 import com.manhwa.tracker.webtoons.service.LocalCoverStorageService;
 import com.manhwa.tracker.webtoons.service.TrendingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -26,18 +29,17 @@ import java.net.URL;
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
 @Service
 public class SocialRankingImageService {
+    private static final Logger log = LoggerFactory.getLogger(SocialRankingImageService.class);
+
     private static final int IMAGE_WIDTH = 1080;
     private static final int IMAGE_HEIGHT = 1350;
-    private static final int HEADER_HEIGHT = 220;
-    private static final int FOOTER_HEIGHT = 70;
-    private static final int ENTRY_HEIGHT = 178;
-    private static final int ENTRY_SPACING = 14;
     private static final DecimalFormat INTEGER_FORMAT = new DecimalFormat("#,###");
     private static final DecimalFormat DECIMAL_FORMAT = new DecimalFormat("#,###.0");
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US);
@@ -60,30 +62,58 @@ public class SocialRankingImageService {
     }
 
     public byte[] createImage(SocialRankingImageRequest request) throws IOException {
+        long startedAt = System.nanoTime();
         SocialRankingImageRequest normalized = normalize(request);
         List<TrendingManhwaDTO> rows = trendingService.getTrending(
                 normalized.getMetric(),
                 normalized.getSourceId(),
                 normalized.getLimit(),
                 normalized.getMode(),
-                null
+                normalized.getWindow(),
+                normalized.getGenre(),
+                normalized.getMinPreviousValue()
         );
         if (rows.size() > normalized.getLimit()) {
             rows = rows.subList(0, normalized.getLimit());
         }
 
-        BufferedImage canvas = render(normalized, rows);
+        RenderStats stats = new RenderStats();
+        BufferedImage canvas = render(normalized, rows, stats);
+        byte[] bytes;
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             ImageIO.write(canvas, "png", baos);
-            return baos.toByteArray();
+            bytes = baos.toByteArray();
         }
+
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+        log.info(
+                "social-image telemetry mode={} window={} source={} format={} theme={} pace={} intensity={} variant={} rows={} renderMs={} fallbackCovers={} longestTitle={}",
+                normalized.getMode(),
+                normalized.getWindow(),
+                normalized.getSourceId(),
+                normalized.getFormat(),
+                normalized.getTheme(),
+                normalized.getPace(),
+                normalized.getIntensity(),
+                normalized.getVariant(),
+                rows.size(),
+                elapsedMs,
+                stats.fallbackCovers,
+                stats.longestTitle
+        );
+
+        return bytes;
     }
 
     private SocialRankingImageRequest normalize(SocialRankingImageRequest request) {
         SocialRankingImageRequest normalized = new SocialRankingImageRequest();
-        normalized.setMetric(request.getMetric() == null ? MetricType.VIEWS : request.getMetric());
+        MetricType requestedMetric = request.getMetric() == null ? MetricType.VIEWS : request.getMetric();
+        normalized.setMetric(normalizeMetricForSource(requestedMetric, request.getSourceId()));
         normalized.setMode(request.getMode() == null ? TrendingRankingMode.RATE : request.getMode());
+        normalized.setWindow(request.getWindow() == null ? RankingWindow.WEEKLY : request.getWindow());
         normalized.setSourceId(request.getSourceId());
+        normalized.setGenre(request.getGenre());
+        normalized.setMinPreviousValue(request.getMinPreviousValue());
 
         String format = sanitizeFormat(request.getFormat());
         int defaultLimit = switch (format) {
@@ -100,27 +130,36 @@ public class SocialRankingImageService {
         normalized.setTheme(sanitizeTheme(request.getTheme()));
         normalized.setFormat(format);
         normalized.setPace(sanitizePace(request.getPace()));
+        normalized.setIntensity(sanitizeIntensity(request.getIntensity()));
+        normalized.setCtaHandle(sanitizeHandle(request.getCtaHandle()));
+        normalized.setCtaText(sanitizeCtaText(request.getCtaText(), normalized.getWindow()));
+        normalized.setCampaignTag(sanitizeCampaignTag(request.getCampaignTag()));
+        normalized.setVariant(sanitizeVariant(request.getVariant(), normalized));
         return normalized;
     }
 
-    private BufferedImage render(SocialRankingImageRequest request, List<TrendingManhwaDTO> rows) {
-        ThemeSpec theme = resolveTheme(request.getTheme());
+    private BufferedImage render(SocialRankingImageRequest request, List<TrendingManhwaDTO> rows, RenderStats stats) {
+        SafeAreaSpec safeArea = resolveSafeArea(request.getFormat());
+        LayoutSpec layout = adjustLayout(resolveLayout(request.getFormat()), safeArea, rows.size());
+        ThemeSpec theme = resolveTheme(request.getTheme(), request.getVariant());
+
         BufferedImage canvas = new BufferedImage(IMAGE_WIDTH, IMAGE_HEIGHT, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = canvas.createGraphics();
         applyRenderingHints(g);
 
         drawBackground(g, theme);
-        drawHeader(g, request, theme, rows.isEmpty());
-        int startY = HEADER_HEIGHT;
+        drawHeader(g, request, theme, safeArea, layout, rows.isEmpty());
+        int startY = safeArea.topInset() + layout.headerHeight();
+
         if (rows.isEmpty()) {
-            drawEmptyState(g, startY, IMAGE_HEIGHT - startY - FOOTER_HEIGHT, theme);
+            drawEmptyState(g, startY, IMAGE_HEIGHT - startY - safeArea.bottomInset() - layout.footerHeight(), theme, safeArea);
         } else {
             for (int i = 0; i < rows.size(); i++) {
-                int y = startY + i * (ENTRY_HEIGHT + ENTRY_SPACING);
-                drawEntry(g, rows.get(i), i, y, request.getSourceId(), theme);
+                int y = startY + i * (layout.entryHeight() + layout.entrySpacing());
+                drawEntry(g, rows.get(i), i, y, request.getSourceId(), theme, safeArea, layout, stats);
             }
         }
-        drawFooter(g, request, theme);
+        drawFooter(g, request, theme, safeArea, layout);
 
         g.dispose();
         return canvas;
@@ -136,20 +175,30 @@ public class SocialRankingImageService {
         g.setColor(withAlpha(theme.highlight(), 40));
         g.fill(new Ellipse2D.Double(620, -140, 560, 560));
         g.setColor(withAlpha(theme.cardBackground(), 75));
-        g.fill(new RoundRectangle2D.Double(40, 30, IMAGE_WIDTH - 80, 180, 36, 36));
+        g.fill(new RoundRectangle2D.Double(40, 30, IMAGE_WIDTH - 80, 190, 36, 36));
     }
 
-    private void drawHeader(Graphics2D g, SocialRankingImageRequest request, ThemeSpec theme, boolean empty) {
+    private void drawHeader(
+            Graphics2D g,
+            SocialRankingImageRequest request,
+            ThemeSpec theme,
+            SafeAreaSpec safeArea,
+            LayoutSpec layout,
+            boolean empty
+    ) {
         Font titleFont = new Font("SansSerif", Font.BOLD, 56);
-        Font subtitleFont = new Font("SansSerif", Font.BOLD, 28);
+        Font subtitleFont = new Font("SansSerif", Font.BOLD, 26);
         Font metaFont = new Font("SansSerif", Font.PLAIN, 20);
+
+        int leftX = safeArea.sideInset();
+        int headerTop = safeArea.topInset();
 
         g.setColor(theme.primaryText());
         g.setFont(titleFont);
         String title = request.getTitle() == null || request.getTitle().isBlank()
-                ? "Top Manhwa This Week"
+                ? buildDefaultTitle(request)
                 : request.getTitle();
-        g.drawString(title, 72, 108);
+        g.drawString(ellipsize(title, 38), leftX, headerTop + 88);
 
         String subtitle = request.getSubtitle();
         if (subtitle == null || subtitle.isBlank()) {
@@ -157,45 +206,59 @@ public class SocialRankingImageService {
         }
         g.setFont(subtitleFont);
         g.setColor(theme.secondaryText());
-        g.drawString(subtitle, 74, 154);
+        g.drawString(ellipsize(subtitle, 58), leftX + 2, headerTop + 132);
+
+        g.setFont(metaFont);
+        g.setColor(withAlpha(theme.primaryText(), 220));
+        String meta = request.getWindow().name() + " window | " + resolveSource(request.getSourceId());
+        g.drawString(meta, leftX + 2, headerTop + 170);
 
         if (request.getIncludeTimestamp()) {
-            g.setFont(metaFont);
             String timestamp = "Generated " + LocalDateTime.now().format(TIMESTAMP_FORMATTER);
             FontMetrics metrics = g.getFontMetrics(metaFont);
             int width = metrics.stringWidth(timestamp);
-            g.setColor(withAlpha(theme.primaryText(), 210));
-            g.drawString(timestamp, IMAGE_WIDTH - 72 - width, 70);
+            g.drawString(timestamp, IMAGE_WIDTH - safeArea.sideInset() - width, headerTop + 46);
         }
 
         if (empty) {
-            g.setFont(metaFont);
             g.setColor(withAlpha(theme.primaryText(), 220));
-            g.drawString("No ranking data available for this configuration.", 74, 192);
+            g.drawString("No ranking data available for this configuration.", leftX + 2, headerTop + layout.headerHeight() - 16);
         }
     }
 
-    private void drawEmptyState(Graphics2D g, int startY, int availableHeight, ThemeSpec theme) {
+    private void drawEmptyState(Graphics2D g, int startY, int availableHeight, ThemeSpec theme, SafeAreaSpec safeArea) {
         Font messageFont = new Font("SansSerif", Font.PLAIN, 24);
         g.setFont(messageFont);
         g.setColor(withAlpha(theme.secondaryText(), 180));
-        g.drawString("Nothing to rank yet. Run a scrape job and try again.", 60, startY + availableHeight / 2);
+        g.drawString("Nothing to rank yet. Run a scrape job and try again.", safeArea.sideInset(), startY + availableHeight / 2);
     }
 
-    private void drawEntry(Graphics2D g, TrendingManhwaDTO row, int index, int y, Integer requestedSourceId, ThemeSpec theme) {
-        int cardX = 44;
-        int cardWidth = IMAGE_WIDTH - 88;
-        RoundRectangle2D card = new RoundRectangle2D.Double(cardX, y, cardWidth, ENTRY_HEIGHT, 30, 30);
+    private void drawEntry(
+            Graphics2D g,
+            TrendingManhwaDTO row,
+            int index,
+            int y,
+            Integer requestedSourceId,
+            ThemeSpec theme,
+            SafeAreaSpec safeArea,
+            LayoutSpec layout,
+            RenderStats stats
+    ) {
+        stats.longestTitle = Math.max(stats.longestTitle, row.getTitle() == null ? 0 : row.getTitle().length());
+
+        int cardX = safeArea.sideInset();
+        int cardWidth = IMAGE_WIDTH - (2 * safeArea.sideInset());
+        RoundRectangle2D card = new RoundRectangle2D.Double(cardX, y, cardWidth, layout.entryHeight(), 30, 30);
         g.setColor(withAlpha(theme.cardBackground(), 215));
         g.fill(card);
         g.setColor(withAlpha(theme.cardBorder(), 180));
         g.setStroke(new BasicStroke(2f));
         g.draw(card);
 
-        int coverSize = 136;
+        int coverSize = layout.entryHeight() - 26;
         int coverX = cardX + 22;
-        int coverY = y + (ENTRY_HEIGHT - coverSize) / 2;
-        BufferedImage cover = loadCover(resolveCoverUrl(row, requestedSourceId));
+        int coverY = y + (layout.entryHeight() - coverSize) / 2;
+        BufferedImage cover = loadCover(resolveCoverUrl(row, requestedSourceId), stats);
         g.drawImage(cover, coverX, coverY, coverSize, coverSize, null);
 
         int badgeX = coverX + coverSize + 20;
@@ -207,14 +270,15 @@ public class SocialRankingImageService {
         g.drawString(rankBadge(index), badgeX + 18, badgeY + 30);
 
         int textX = badgeX + 96;
-        int titleY = badgeY + 32;
-        g.setColor(theme.primaryText());
-        g.setFont(new Font("SansSerif", Font.BOLD, 34));
-        g.drawString(ellipsize(row.getTitle(), 34), textX, titleY);
+        int textWidth = (cardX + cardWidth) - textX - 22;
+        int titleTopY = badgeY + 6;
+        int titleBottomY = drawWrappedTitle(g, row.getTitle(), textX, titleTopY, textWidth, layout.maxTitleLines(), theme);
+        int metricBaseline = Math.min(y + layout.entryHeight() - 24, titleBottomY + 34);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 26));
+        g.setColor(theme.primaryText());
+        g.setFont(new Font("SansSerif", Font.BOLD, 25));
         g.setColor(theme.accent());
-        g.drawString(describeMetricValue(row), badgeX, titleY + 46);
+        g.drawString(describeMetricValue(row), badgeX, metricBaseline);
     }
 
     private String describeMetricValue(TrendingManhwaDTO row) {
@@ -224,18 +288,25 @@ public class SocialRankingImageService {
             case PCT -> "Growth " + (row.getGrowthPercent() == null ? "-" : ("+" + DECIMAL_FORMAT.format(row.getGrowthPercent() * 100) + "%"));
             case TOTAL -> "Total " + INTEGER_FORMAT.format(row.getLatestValue());
             case ENGAGEMENT -> "Engagement " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
-            case ACCELERATION -> "Acceleration " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
+            case ACCELERATION -> "Heating Up " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
+            case SOCIAL -> "Social Score " + (row.getRankingScore() == null ? "-" : DECIMAL_FORMAT.format(row.getRankingScore()));
         };
     }
 
-    private BufferedImage loadCover(String url) {
+    private BufferedImage loadCover(String url, RenderStats stats) {
         if (url == null || url.isBlank()) {
+            stats.fallbackCovers++;
             return placeholderCover;
         }
         try (InputStream in = new URL(url).openStream()) {
             BufferedImage fetched = ImageIO.read(in);
-            return fetched == null ? placeholderCover : fetched;
+            if (fetched == null) {
+                stats.fallbackCovers++;
+                return placeholderCover;
+            }
+            return fetched;
         } catch (IOException e) {
+            stats.fallbackCovers++;
             return placeholderCover;
         }
     }
@@ -294,9 +365,23 @@ public class SocialRankingImageService {
         return text.substring(0, maxLength - 3) + "...";
     }
 
+    private String buildDefaultTitle(SocialRankingImageRequest request) {
+        return switch (request.getMode()) {
+            case RATE -> request.getWindow() == RankingWindow.DAILY ? "Fastest Rising Today" : "Fastest Rising This Week";
+            case PCT -> request.getWindow() == RankingWindow.DAILY ? "Breakout of the Day" : "Breakout of the Week";
+            case ABS -> "Biggest " + (request.getWindow() == RankingWindow.DAILY ? "Daily" : "Weekly") + " Gainers";
+            case ACCELERATION -> "Heating Up Fast";
+            case TOTAL -> "Most Followed Right Now";
+            case ENGAGEMENT -> "Fan Efficiency Leaders";
+            case SOCIAL -> "Editor's Social Rank";
+        };
+    }
+
     private String buildDefaultSubtitle(SocialRankingImageRequest request) {
         String source = resolveSource(request.getSourceId());
-        return "Top " + request.getLimit() + " | " + source + " | " + request.getMetric().name();
+        String metric = request.getMetric().name();
+        String window = request.getWindow() == RankingWindow.DAILY ? "24h" : "7d";
+        return "Top " + request.getLimit() + " | " + source + " | " + metric + " | " + window;
     }
 
     private String resolveSource(Integer sourceId) {
@@ -322,12 +407,24 @@ public class SocialRankingImageService {
         return "#" + (index + 1);
     }
 
-    private void drawFooter(Graphics2D g, SocialRankingImageRequest request, ThemeSpec theme) {
-        g.setColor(withAlpha(theme.cardBackground(), 190));
-        g.fill(new RoundRectangle2D.Double(44, IMAGE_HEIGHT - FOOTER_HEIGHT + 8, IMAGE_WIDTH - 88, FOOTER_HEIGHT - 20, 20, 20));
-        g.setColor(withAlpha(theme.secondaryText(), 220));
+    private void drawFooter(
+            Graphics2D g,
+            SocialRankingImageRequest request,
+            ThemeSpec theme,
+            SafeAreaSpec safeArea,
+            LayoutSpec layout
+    ) {
+        int footerY = IMAGE_HEIGHT - safeArea.bottomInset() - layout.footerHeight();
+        int footerX = safeArea.sideInset();
+        int footerWidth = IMAGE_WIDTH - (2 * safeArea.sideInset());
+        int footerHeight = layout.footerHeight() - 14;
+
+        g.setColor(withAlpha(theme.cardBackground(), 192));
+        g.fill(new RoundRectangle2D.Double(footerX, footerY, footerWidth, footerHeight, 20, 20));
+        g.setColor(withAlpha(theme.secondaryText(), 230));
         g.setFont(new Font("SansSerif", Font.PLAIN, 18));
-        g.drawString("Data: Manhwa Trend Tracker  |  theme=" + request.getTheme() + " format=" + request.getFormat(), 66, IMAGE_HEIGHT - 26);
+        String left = request.getCtaText() + " " + request.getCtaHandle() + " " + request.getCampaignTag();
+        g.drawString(ellipsize(left, 72), footerX + 16, footerY + 28);
     }
 
     private String sanitizeTheme(String theme) {
@@ -347,7 +444,7 @@ public class SocialRankingImageService {
         }
         String normalized = format.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "tiktok", "instagram", "x" -> normalized;
+            case "tiktok", "instagram", "x", "reels" -> normalized;
             default -> "instagram";
         };
     }
@@ -363,8 +460,73 @@ public class SocialRankingImageService {
         };
     }
 
-    private ThemeSpec resolveTheme(String themeName) {
-        return switch (themeName) {
+    private String sanitizeIntensity(String intensity) {
+        if (intensity == null || intensity.isBlank()) {
+            return "standard";
+        }
+        String normalized = intensity.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "calm", "standard", "hype" -> normalized;
+            default -> "standard";
+        };
+    }
+
+    private String sanitizeHandle(String handle) {
+        if (handle == null || handle.isBlank()) {
+            return "@manhwa.tracker";
+        }
+        return handle.trim();
+    }
+
+    private String sanitizeCtaText(String ctaText, RankingWindow window) {
+        if (ctaText == null || ctaText.isBlank()) {
+            return window == RankingWindow.DAILY ? "Follow for daily movers" : "Follow for weekly winners";
+        }
+        return ctaText.trim();
+    }
+
+    private String sanitizeCampaignTag(String campaignTag) {
+        if (campaignTag == null || campaignTag.isBlank()) {
+            return "#manhwa";
+        }
+        return campaignTag.trim();
+    }
+
+    private String sanitizeVariant(String variant, SocialRankingImageRequest request) {
+        if (variant != null && !variant.isBlank()) {
+            String normalized = variant.trim().toUpperCase(Locale.ROOT);
+            if ("A".equals(normalized) || "B".equals(normalized)) {
+                return normalized;
+            }
+        }
+        String key = request.getMetric().name()
+                + "|" + request.getMode().name()
+                + "|" + request.getWindow().name()
+                + "|" + (request.getSourceId() == null ? "ALL" : request.getSourceId())
+                + "|" + request.getFormat();
+        return Math.abs(key.hashCode()) % 2 == 0 ? "A" : "B";
+    }
+
+    private MetricType normalizeMetricForSource(MetricType metricType, Integer sourceId) {
+        if (metricType == null || sourceId == null) {
+            return metricType == null ? MetricType.VIEWS : metricType;
+        }
+        if (sourceId == 2) {
+            // Asura ranking data is follower-driven.
+            if (metricType == MetricType.VIEWS || metricType == MetricType.SUBSCRIBERS || metricType == MetricType.LIKES) {
+                return MetricType.FOLLOWERS;
+            }
+            return metricType;
+        }
+        if (metricType == MetricType.FOLLOWERS) {
+            // Follower metric is Asura-only in current ingestion; fall back for non-Asura sources.
+            return sourceId == 3 ? MetricType.SUBSCRIBERS : MetricType.VIEWS;
+        }
+        return metricType;
+    }
+
+    private ThemeSpec resolveTheme(String themeName, String variant) {
+        ThemeSpec base = switch (themeName) {
             case "neon" -> new ThemeSpec(
                     new Color(17, 12, 40),
                     new Color(4, 8, 26),
@@ -402,10 +564,143 @@ public class SocialRankingImageService {
                     new Color(10, 20, 36)
             );
         };
+        if ("B".equals(variant)) {
+            return new ThemeSpec(
+                    base.backgroundTop(),
+                    base.backgroundBottom(),
+                    base.highlight(),
+                    base.accent(),
+                    base.cardBackground(),
+                    base.cardBorder(),
+                    base.primaryText(),
+                    base.secondaryText(),
+                    base.badgeColor(),
+                    base.badgeTextColor()
+            );
+        }
+        return base;
+    }
+
+    private SafeAreaSpec resolveSafeArea(String format) {
+        return switch (format) {
+            case "tiktok" -> new SafeAreaSpec(88, 190, 56);
+            case "reels" -> new SafeAreaSpec(76, 150, 52);
+            case "x" -> new SafeAreaSpec(52, 84, 84);
+            default -> new SafeAreaSpec(64, 110, 48);
+        };
+    }
+
+    private LayoutSpec resolveLayout(String format) {
+        return switch (format) {
+            case "tiktok" -> new LayoutSpec(184, 108, 176, 14, 2);
+            case "x" -> new LayoutSpec(174, 96, 188, 18, 2);
+            default -> new LayoutSpec(180, 100, 182, 14, 2);
+        };
+    }
+
+    private LayoutSpec adjustLayout(LayoutSpec base, SafeAreaSpec safeArea, int rowCount) {
+        if (rowCount <= 0) {
+            return base;
+        }
+        int startY = safeArea.topInset() + base.headerHeight();
+        int available = IMAGE_HEIGHT - safeArea.bottomInset() - base.footerHeight() - startY;
+        int spacing = base.entrySpacing();
+        if (rowCount > 1) {
+            int maxSpacing = (available - (120 * rowCount)) / (rowCount - 1);
+            spacing = Math.max(8, Math.min(spacing, maxSpacing));
+        } else {
+            spacing = 0;
+        }
+        int usable = available - (spacing * Math.max(0, rowCount - 1));
+        int entryHeight = Math.max(120, Math.min(base.entryHeight(), usable / rowCount));
+        int maxTitleLines = entryHeight >= 150 ? 2 : 1;
+        return new LayoutSpec(base.headerHeight(), base.footerHeight(), entryHeight, spacing, maxTitleLines);
+    }
+
+    private int drawWrappedTitle(
+            Graphics2D g,
+            String rawTitle,
+            int x,
+            int topY,
+            int maxWidth,
+            int maxLines,
+            ThemeSpec theme
+    ) {
+        String title = rawTitle == null || rawTitle.isBlank() ? "Untitled" : rawTitle.trim();
+        for (int size = 33; size >= 15; size--) {
+            Font font = new Font("SansSerif", Font.BOLD, size);
+            g.setFont(font);
+            FontMetrics fm = g.getFontMetrics(font);
+            List<String> lines = wrapLines(fm, title, maxWidth);
+            if (lines.size() <= maxLines) {
+                g.setColor(theme.primaryText());
+                int baseline = topY;
+                int lineHeight = fm.getHeight() + 2;
+                for (int i = 0; i < lines.size(); i++) {
+                    baseline += lineHeight;
+                    g.drawString(lines.get(i), x, baseline);
+                }
+                return baseline;
+            }
+        }
+
+        Font font = new Font("SansSerif", Font.BOLD, 15);
+        g.setFont(font);
+        FontMetrics fm = g.getFontMetrics(font);
+        List<String> lines = wrapLines(fm, title, maxWidth);
+        int baseline = topY;
+        int lineHeight = fm.getHeight() + 2;
+        for (int i = 0; i < Math.min(maxLines, lines.size()); i++) {
+            baseline += lineHeight;
+            g.drawString(lines.get(i), x, baseline);
+        }
+        return baseline;
+    }
+
+    private List<String> wrapLines(FontMetrics metrics, String text, int maxWidth) {
+        List<String> lines = new ArrayList<>();
+        String[] words = text.split("\\s+");
+        StringBuilder line = new StringBuilder();
+        for (String word : words) {
+            String next = line.isEmpty() ? word : line + " " + word;
+            if (metrics.stringWidth(next) <= maxWidth) {
+                line.setLength(0);
+                line.append(next);
+                continue;
+            }
+            if (!line.isEmpty()) {
+                lines.add(line.toString());
+                line.setLength(0);
+                line.append(word);
+                continue;
+            }
+            lines.add(word);
+        }
+        if (!line.isEmpty()) {
+            lines.add(line.toString());
+        }
+        return lines;
     }
 
     private Color withAlpha(Color color, int alpha) {
         return new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.max(0, Math.min(255, alpha)));
+    }
+
+    private static class RenderStats {
+        private int fallbackCovers = 0;
+        private int longestTitle = 0;
+    }
+
+    private record SafeAreaSpec(int topInset, int bottomInset, int sideInset) {
+    }
+
+    private record LayoutSpec(
+            int headerHeight,
+            int footerHeight,
+            int entryHeight,
+            int entrySpacing,
+            int maxTitleLines
+    ) {
     }
 
     private record ThemeSpec(
